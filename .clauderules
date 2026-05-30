@@ -1,0 +1,232 @@
+# Claude Code Project Rules
+
+## Code Style and Formatting
+
+### Character Usage
+- NEVER use emojis in any files (code, documentation, comments, commit messages)
+- NEVER use em-dashes (-) or en-dashes (-)
+- Use regular hyphens (-) for all dash purposes
+- Use standard ASCII characters only in code and comments
+- UTF-8 is acceptable for user-facing strings, but avoid decorative Unicode
+
+### Documentation Style
+- Use plain Markdown without emoji decorations
+- Use regular hyphens for bullet points and lists
+- Use asterisks (*) or underscores (_) for emphasis, not emoji
+- Keep all documentation readable in plain text terminals
+
+### Comments
+- Write clear, technical comments without emoji
+- Use standard punctuation only
+- Focus on explaining WHY, not WHAT (code shows what)
+- For complex logic, add detailed multi-line comments
+- Simple, obvious operations need no comment
+
+### Commit Messages
+- Follow conventional commits format: `type(scope): description`
+- No emoji in commit messages
+- Types: feat, fix, docs, style, refactor, test, chore
+- Keep first line under 72 characters
+- Use imperative mood: "add feature" not "added feature"
+- Body lines wrapped at 72 characters
+
+## Language Preferences
+
+### Programming Languages
+- Primary: BASH, Python, Go, C#
+- Always include comments for code clarity
+- Detailed comments only for complex logic
+- Simple operations can have brief or no comments
+
+### Cross-Platform Compatibility
+- All applications must be fully cross-platform compatible
+- Target platforms: Linux, macOS, Windows
+- Use path separators correctly (os.path.join in Python, filepath in Go)
+- Handle line endings appropriately
+- Never hardcode platform-specific paths
+
+## File Naming Conventions
+
+### General Rules
+- Use underscores (_) instead of spaces in ALL filenames
+- Use lowercase for most filenames
+- Follow Linux-friendly conventions
+- Examples:
+  - Good: my_script.sh, config_parser.py, user_data.json
+  - Bad: My Script.sh, config-parser.py, "user data.json"
+
+### Configuration and Data Storage
+- CLI flags for database connections and runtime overrides
+- User data and settings stored under the platform-appropriate path resolved by /platform/paths.cs:
+  - Linux: ~/.config/app_name/ (XDG base directory spec)
+  - macOS: ~/Library/Application Support/AppName/
+  - Windows: %APPDATA%\AppName\
+- Never hardcode any of these paths directly; always resolve through the platform abstraction layer
+- Store configuration in JSON; YAML and TOML are also acceptable but JSON is the default for this project
+- The search index uses SQLite (FTS5); this is not a flat-file config format and is exempt from the above format preference
+
+## License Headers
+
+### Required on All New Source Files
+- Every new source file must include the appropriate license header for the project
+- Check the project LICENSE file to determine the correct header format
+- This project is licensed under GPL-3.0-or-later. Use the following SPDX header on all new source files:
+  - `// SPDX-License-Identifier: GPL-3.0-or-later` (C#/Go/BASH)
+  - `# SPDX-License-Identifier: GPL-3.0-or-later` (Python/BASH)
+- Never omit the license header from a new file
+- Never change an existing license header without explicit instruction
+
+## Project Structure
+
+### Required Files
+- README.md with clear project description and usage
+- CHANGELOG.md following Keep a Changelog format (update with EVERY change)
+- PLANNING.md tracking goals, milestones, open questions, and decisions
+- CLAUDE.md documenting project context, build steps, and conventions for AI sessions
+- ARCHITECTURE.md documenting components, data flow, and key design decisions
+- LICENSE file
+- .gitignore appropriate for languages used
+- CONTRIBUTING.md if project accepts contributions
+
+### Documentation
+- Keep documentation up to date with code changes
+- Document all public APIs and exported functions
+- Include usage examples in README.md
+- Keep installation instructions current
+- Update ARCHITECTURE.md when structural changes are made
+- Update PLANNING.md when goals or decisions change
+
+## Git and Branch Workflow
+
+### Branch Rules
+- NEVER commit directly to master
+- NEVER push directly to master
+- All changes must go through a feature branch and pull request
+- Branch naming: type/short-description (e.g. feat/add-login, fix/null-pointer)
+- One logical change per branch
+
+### Pull Requests
+- PRs must target master
+- All tests must pass before a PR is suggested
+- CHANGELOG.md must be updated in the same branch as the change
+- PR description must summarize what changed and why
+
+### Commits
+- Atomic commits - one logical change per commit
+- Never combine unrelated changes in a single commit
+- Never amend or force-push commits that have been shared
+
+## Development Workflow
+
+### Before Making Changes
+1. Read CLAUDE.md and ARCHITECTURE.md to understand the project
+2. Review existing code style in the project
+3. Check CHANGELOG.md format and version state
+4. Confirm the approach with the user before starting
+
+### Scope Control
+- Only modify files directly relevant to the task at hand
+- Related files (e.g. tests for code changed) may be updated when clearly necessary
+- NEVER refactor, reformat, or restructure code that was not part of the request
+- NEVER rename variables, functions, or files opportunistically
+- If improvements outside scope are noticed, mention them - do not make them unilaterally
+
+### When Making Changes
+1. Update CHANGELOG.md in the same commit as code changes
+2. Add/update tests if applicable
+3. Update documentation if behavior changes
+4. Ensure cross-platform compatibility
+5. Add license header to any new source files
+
+### Destructive Operations
+- ALWAYS confirm with the user before deleting any file
+- ALWAYS confirm before overwriting a file that was not explicitly part of the task
+- NEVER delete directories without explicit instruction
+- When in doubt, ask - do not assume deletion is intended
+
+### Dependencies
+- NEVER introduce a new dependency without discussing it with the user first
+- Prefer standard library solutions over third-party packages when reasonable
+- If a dependency is needed, explain why and wait for approval before adding it
+- Document new dependencies in the appropriate file (go.mod, requirements.txt, DataJack.csproj, etc.)
+- The following dependencies are pre-ratified for this project and require no further approval:
+  - Avalonia - cross-platform native UI framework
+  - MoonSharp - Lua 5.2 scripting engine (pure C#, sandboxable)
+  - Microsoft.Data.Sqlite - SQLite access including FTS5 full-text search
+  - System.Net.Security.SslStream - TLS 1.2/1.3 with client certificate support (built into .NET)
+  - System.Threading.Channels - lock-free inter-thread queues with backpressure (built into .NET)
+
+### Testing
+- Run all existing tests before suggesting a commit or PR
+- Tests must pass - do not suggest a PR with failing tests
+- If tests cannot be run, say so explicitly and explain why
+- Verify cross-platform compatibility where applicable
+- Check for breaking changes in public APIs
+
+## Methodical Approach
+
+### Step-by-Step Development
+- Discuss and agree on next steps before implementing
+- Break complex tasks into smaller, manageable pieces
+- Validate each step before proceeding
+- Be precise when requirements call for it
+- Move quickly when appropriate (prototyping, exploration)
+
+### Decision Points
+- Always confirm the approach before major changes
+- Ask for clarification when requirements are ambiguous
+- Propose solutions with trade-offs explained
+- Default to standards and best practices unless told otherwise
+- When multiple valid approaches exist, present options rather than picking unilaterally
+
+## Application Types
+
+### CLI Applications
+- Use argparse (Python) or flag/cobra (Go) for argument parsing
+- Provide --help output with clear usage examples
+- Support --version flag
+- Exit with appropriate status codes (0 success, non-zero failure)
+- Use stderr for errors, stdout for data output
+- Support --verbose / --quiet flags for log verbosity
+
+### GUI Applications
+- Must work cross-platform (Linux, macOS, Windows)
+- Use appropriate toolkit (GTK, Qt, Avalonia, or web-based)
+- This project uses Avalonia UI; it renders natively on X11/Wayland, DirectX, and Metal
+- Follow platform UI guidelines where possible
+- Provide keyboard shortcuts for common actions
+- Never hardcode font sizes, colors, or paths
+
+### Services and Daemons
+- Handle SIGTERM and SIGINT for graceful shutdown
+- Handle SIGHUP for configuration reload where appropriate
+- Write PID file to standard location when daemonizing
+- Provide a systemd unit file (and launchd plist / Windows service wrapper for cross-platform)
+- Log to stderr by default; support configurable log destination
+- Never block the main loop on non-critical work
+- Document all runtime flags and environment variables
+
+## Error Handling
+
+### General Principles
+- Always handle errors explicitly - no ignored return values
+- Provide clear, actionable error messages that describe what failed and why
+- Log errors at the appropriate level
+- Exit gracefully on fatal errors with a non-zero status code
+- No silent failures under any circumstances
+
+### Logging
+- Use standard logging libraries for the language
+- Include timestamps in all log output
+- Use appropriate log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- Make log verbosity configurable via flag or environment variable
+- Do not log sensitive data (credentials, tokens, PII)
+
+## Security Considerations
+
+- NEVER commit credentials, tokens, API keys, or secrets of any kind
+- Use environment variables or files under ~/.app_name/ for sensitive data
+- Validate and sanitize all user input
+- Use prepared statements for all database queries
+- Follow principle of least privilege for file permissions and process capabilities
+- Do not store sensitive data in plain text without explicit instruction

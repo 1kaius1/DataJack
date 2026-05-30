@@ -1,0 +1,86 @@
+# Build output
+bin/
+obj/
+dist/
+out/
+
+# .NET / NuGet
+*.user
+*.suo
+*.userprefs
+*.usertasks
+.vs/
+.vscode/
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+packages/
+nuget.config.local
+
+# Test results and coverage
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+
+# Publish output (self-contained binaries)
+dist/linux-x64/
+dist/linux-arm64/
+dist/osx-x64/
+dist/osx-arm64/
+dist/win-x64/
+
+# Packaging artifacts (built by scripts, not committed)
+*.deb
+*.rpm
+*.AppImage
+*.flatpak
+*.snap
+*.dmg
+*.msi
+*.exe
+build-dir/
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Credentials and secrets - never commit these
+*.p12
+*.pfx
+*.pem
+*.key
+secrets.json
+local.settings.json
+
+# User-local config overrides
+*.local.json
+
+# Logs (runtime logs, not the log subsystem source code)
+*.log
+logs/runtime/
+
+# Backup files
+*.backup
+*.bak
+*.orig
