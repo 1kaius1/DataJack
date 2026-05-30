@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Platform path resolution: Paths.cs resolves config, log, plugin, script, and theme
+  directories per OS (XDG on Linux, Application Support on macOS, AppData on Windows);
+  respects XDG_CONFIG_HOME when set to an absolute path
+- PathsTests: 6 unit tests covering absolute path guarantee, app-name segment, and
+  subdirectory relationships
 - Solution scaffolding: DataJack.Core class library, DataJack Avalonia executable, and
   DataJack.Core.Tests xUnit project wired into DataJack.slnx
 - Minimal Avalonia entry point (Program.cs, App.cs, MainWindow.cs) producing a compiling,
