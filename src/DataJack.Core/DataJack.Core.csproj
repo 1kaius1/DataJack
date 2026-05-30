@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Disable auto-glob so we control exactly which directories belong to this library. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <!-- All non-UI source directories belong to the core library. -->
+  <ItemGroup>
+    <Compile Include="../core/**/*.cs" />
+    <Compile Include="../net/**/*.cs" />
+    <Compile Include="../platform/**/*.cs" />
+    <Compile Include="../plugins/**/*.cs" />
+    <Compile Include="../scripting/**/*.cs" />
+    <Compile Include="../storage/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+
+</Project>
