@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCStateModel (Model.cs): single-writer state model with volatile snapshot field and
+  pure Apply(Func<snapshot, snapshot>) mutation pattern; CreateQuery() returns a
+  snapshot-bound IRCStateQuery for consistent point-in-time reads from any thread
+- IRCStateQuery interface and StateQuery implementation (Query.cs): GetCurrentNick,
+  GetChannelUsers, GetChannelModes, GetChannelTopic, GetUserModes, IsConnected,
+  GetActiveCapabilities; all read from the snapshot captured at query creation time
+- Immutable state tree snapshot types (Snapshot.cs): IrcWorldSnapshot, ServerState,
+  ChannelState, ChannelUser, QueryState, MonitoredNick, Topic, ModeSet; all sealed
+  records supporting "with" expressions for immutable updates in Phase 1 handlers
+- IrcStateModelTests: 5 tests covering initial empty state, Apply mutation, connected
+  state reflection, snapshot isolation, and unknown server/channel edge cases
 - EventDispatcher (Bus.cs): three bounded Channel<Action> queues (Critical/Normal/Low);
   Subscribe<T>/Unsubscribe<T>/PublishAsync<T>; single dispatch thread with priority
   ordering; IAsyncDisposable lifecycle; ReaderWriterLockSlim-protected handler registry
