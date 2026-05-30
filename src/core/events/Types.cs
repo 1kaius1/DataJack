@@ -23,8 +23,17 @@ public readonly record struct ConnectionEstablished(string Server);
 /// <summary>The connection was dropped, either cleanly or by error.</summary>
 public readonly record struct ConnectionClosed(string Server, string? Reason);
 
+/// <summary>The connection attempt failed before a session was established.</summary>
+public readonly record struct ConnectionFailed(string Server, string Reason);
+
 /// <summary>A reconnection attempt is scheduled after a disconnect.</summary>
 public readonly record struct ReconnectScheduled(string Server, double DelaySeconds, int AttemptNumber);
+
+/// <summary>Reconnection succeeded; lists the channels that were rejoined.</summary>
+public readonly record struct ReconnectSucceeded(string Server, IReadOnlyList<string> RejoinedChannels);
+
+/// <summary>All reconnection attempts were exhausted without success.</summary>
+public readonly record struct ReconnectFailed(string Server, string Reason);
 
 /// <summary>A raw line arrived from the server before any parsing.</summary>
 public readonly record struct RawLineReceived(string Server, string Line);

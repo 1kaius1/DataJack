@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCConnection (Connection.cs): raw line I/O over any INetworkProvider stream; PING answered
+  before the event bus to prevent latency-induced disconnects; publishes ConnectionAttempted,
+  ConnectionEstablished, ConnectionFailed, ConnectionClosed, RawLineReceived, RawLineSent;
+  SemaphoreSlim write lock for thread-safe concurrent sends; configurable encoding with
+  UTF-8 + replacement chars as default; max line length enforced at 8192 bytes
+- TryParsePing: internal static helper handles bare "PING :token" and prefixed
+  ":server PING :token" forms; exposed as internal for unit testing
+- ConnectionFailed, ReconnectSucceeded, ReconnectFailed events added to Types.cs
+- DuplexPipeStream and FakeNetworkProvider test helpers in TestHelpers.cs; reusable
+  by IRCParser and later component tests
+- IrcConnectionTests: 13 tests covering PING parsing (Theory), connection events,
+  receive loop line delivery, automatic PONG, and send path
 - NetworkProvider: INetworkProvider interface, NetworkEndpoint record, AddressFamilyPreference
   enum, and TlsCertificateException (Provider.cs)
 - HappyEyeballs dual-stack connection helper (Ipv6.cs): resolves A+AAAA records, sorts by
