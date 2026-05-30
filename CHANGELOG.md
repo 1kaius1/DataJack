@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- NetworkProvider: INetworkProvider interface, NetworkEndpoint record, AddressFamilyPreference
+  enum, and TlsCertificateException (Provider.cs)
+- HappyEyeballs dual-stack connection helper (Ipv6.cs): resolves A+AAAA records, sorts by
+  preference, starts attempts 250 ms apart per RFC 8305, returns first winner and disposes
+  losing sockets; Nagle disabled on all sockets for low-latency IRC line delivery
+- TcpTransport (Tcp.cs): thin wrapper over HappyEyeballs returning an owning NetworkStream
+- TlsTransport (Tls.cs): TLS 1.2/1.3 with SNI, fingerprint-pin override for self-signed
+  certs, TlsCertificateException on validation failure; client certificate support for
+  SASL EXTERNAL
+- Socks5Transport stub (Socks5.cs): Phase 3 placeholder
+- InternalsVisibleTo DataJack.Core.Tests added to DataJack.Core.csproj
+- NetworkProviderTests: 13 unit tests covering endpoint defaults, address sorting for all
+  four preference modes, certificate fingerprint validation logic, and exception properties
 - CI pipeline (.github/workflows/ci.yml): GitHub Actions matrix across ubuntu-latest,
   windows-latest, and macos-latest; steps are checkout, .NET 10 setup with NuGet cache,
   restore, Release build, test, and TRX artifact upload (always, including on failure)
