@@ -280,4 +280,4 @@ Behavioral rules are in `.clauderules`. Key reminders and C#-specific notes:
 
 See PLANNING.md for active goals, open questions, and pending decisions.
 
-Currently in: Phase 0 (Foundation). Solution scaffolding complete; next steps are Paths.cs, EventDispatcher, and IRCStateModel skeletons.
+Currently in: Phase 1 (IRC Core). Phase 0 complete: solution scaffolded, CI pipeline live, Paths, EventDispatcher, and IRCStateModel all implemented and tested.

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- CI pipeline (.github/workflows/ci.yml): GitHub Actions matrix across ubuntu-latest,
+  windows-latest, and macos-latest; steps are checkout, .NET 10 setup with NuGet cache,
+  restore, Release build, test, and TRX artifact upload (always, including on failure)
 - IRCStateModel (Model.cs): single-writer state model with volatile snapshot field and
   pure Apply(Func<snapshot, snapshot>) mutation pattern; CreateQuery() returns a
   snapshot-bound IRCStateQuery for consistent point-in-time reads from any thread
