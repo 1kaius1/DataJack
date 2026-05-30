@@ -7,23 +7,17 @@ opening an issue or submitting a pull request.
 
 ## Licensing and the Contributor Agreement
 
-This project is dual-licensed under the
-[GNU Affero General Public License v3.0 or later](LICENSE) and a commercial license.
+This project is licensed under the
+[GNU General Public License v3.0 or later](LICENSE).
 
 By submitting a contribution you agree that:
 
 - Your contribution is your original work and you have the right to license it
-- You grant the project maintainer(s) a perpetual, irrevocable, royalty-free license
-  to use your contribution under both the AGPL-3.0 and any commercial license offered
-  by the project
+- Your contribution is submitted under the GPL-3.0-or-later license
 - You have read and accept the terms above
 
 If your contribution is on behalf of an employer or involves work that may be
 subject to an IP agreement, ensure you have the right to contribute before submitting.
-
-<!-- If a formal CLA document exists, link it here. -->
-<!-- Example: A formal CLA is available at docs/CLA.md and must be signed before -->
-<!-- contributions can be accepted. -->
 
 ---
 
@@ -50,11 +44,7 @@ off-topic, abusive, or not aligned with the project goals.
 ### Prerequisites
 
 ```bash
-# List what must be installed before development can begin
-# Example:
-# Go 1.22 or later:   https://go.dev/dl/
-# Python 3.11 or later: https://www.python.org/downloads/
-# make
+# .NET 8 SDK or later: https://dotnet.microsoft.com/download/dotnet/8.0
 # git
 ```
 
@@ -62,24 +52,14 @@ off-topic, abusive, or not aligned with the project goals.
 
 ```bash
 # Clone the repository
-git clone https://github.com/OWNER/REPO.git
-cd REPO
+git clone https://github.com/1kaius1/DataJack.git
+cd DataJack
 
-# Go - download dependencies
-go mod download
-
-# Python - create a virtual environment and install dependencies
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+# Restore dependencies and build
+dotnet build DataJack.sln
 
 # Verify setup - all tests should pass
-# Go
-go test ./...
-
-# Python
-pytest
+dotnet test DataJack.sln
 ```
 
 ---
@@ -151,12 +131,7 @@ chore(deps): update dependencies to latest patch versions
 All tests must pass before opening a pull request:
 
 ```bash
-# Go
-go test ./...
-go test -race ./...
-
-# Python
-pytest
+dotnet test DataJack.sln
 ```
 
 If you cannot run the tests, explain why in the pull request description.
@@ -176,17 +151,17 @@ If you cannot run the tests, explain why in the pull request description.
 Every new source file must include the appropriate SPDX license header as the
 first lines of the file:
 
-```go
-// SPDX-License-Identifier: AGPL-3.0-or-later
+```csharp
+// SPDX-License-Identifier: GPL-3.0-or-later
 ```
 
 ```python
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 ```
 
 ```bash
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 ```
 
 Do not modify the license header of an existing file.
@@ -203,29 +178,14 @@ Do not modify the license header of an existing file.
 - Handle all errors explicitly - no silent failures
 - Follow existing patterns in the codebase before introducing new ones
 
-### Go
+### C#
 
 ```bash
 # Format
-gofmt -w .
-# or
-goimports -w .
+dotnet format DataJack.sln
 
-# Lint
-go vet ./...
-# staticcheck if available: staticcheck ./...
-```
-
-### Python
-
-```bash
-# Format
-black src/ tests/
-
-# Lint
-flake8 src/ tests/
-# or
-ruff check src/ tests/
+# Lint (Roslyn analyzers run automatically during build)
+dotnet build DataJack.sln -warnaserror
 ```
 
 ### BASH
