@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Planning
+**Status:** Phase 0 complete. Phase 1 (IRC Core) is next.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# + Avalonia). No code written yet.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Foundation skeleton is in place and all 15 tests pass on the local build.
 
 ---
 
@@ -44,12 +44,12 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 ### Phase 0 — Foundation
 *A compiling, cross-platform skeleton with CI.*
 
-- [ ] Solution structure matching the module breakdown in ARCHITECTURE.md §17
-- [ ] Cross-platform build (Linux, Windows, macOS) producing self-contained binaries
-- [ ] CI pipeline: build + test on all three platforms
-- [ ] Platform abstraction layer (`/platform`): path resolution only, no business logic
-- [ ] Core `EventDispatcher`: typed events, priority queue, `Channel<Event>` threading model
-- [ ] `IRCStateModel` skeleton: single-writer, immutable snapshot reads, `IRCStateQuery` interface
+- [x] Solution structure matching the module breakdown in ARCHITECTURE.md §17
+- [x] Cross-platform build (Linux, Windows, macOS) producing self-contained binaries
+- [x] CI pipeline: build + test on all three platforms
+- [x] Platform abstraction layer (`/platform`): path resolution only, no business logic
+- [x] Core `EventDispatcher`: typed events, priority queue, `Channel<Event>` threading model
+- [x] `IRCStateModel` skeleton: single-writer, immutable snapshot reads, `IRCStateQuery` interface
 
 ---
 

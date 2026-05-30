@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataJack.Core/DataJack.Core.csproj" />
+    <Project Path="src/DataJack/DataJack.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DataJack.Core.Tests/DataJack.Core.Tests.csproj" />
+  </Folder>
+</Solution>
