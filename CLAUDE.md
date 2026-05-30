@@ -20,10 +20,10 @@ binaries with no dependency on a web engine or runtime interpreter.
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Language | C# (.NET 8+) | Strong async/await model for IRC I/O; managed memory safety at plugin boundaries; SslStream built in |
+| Language | C# (.NET 10) | Strong async/await model for IRC I/O; managed memory safety at plugin boundaries; SslStream built in |
 | GUI toolkit | Avalonia UI | Native rendering on X11/Wayland, DirectX, and Metal without an embedded web engine |
 | Scripting | MoonSharp (Lua 5.2) | Pure C# interpreter; well-defined sandbox API; no native code to compile per platform |
-| Config/persistence | JSON via System.Text.Json | Built into .NET 8; no additional dependency; versioned schema with migrations |
+| Config/persistence | JSON via System.Text.Json | Built into .NET 10; no additional dependency; versioned schema with migrations |
 | Search index | SQLite FTS5 via Microsoft.Data.Sqlite | Full-text search over log history; single-file database; no separate server |
 | Networking | System.Net.Security.SslStream | TLS 1.2/1.3, SNI, client certificates; built into .NET |
 | Inter-thread queues | System.Threading.Channels | Lock-free bounded queues with backpressure; built into .NET |
@@ -75,7 +75,7 @@ DataJack/
 - PLANNING.md           # Goals, milestones, open questions, decisions log
 - README.md             # Public-facing documentation
 - LICENSE               # GPL-3.0-or-later
-- DataJack.sln          # Solution file
+- DataJack.slnx         # Solution file (.NET 10 slnx format)
 ```
 
 ---
@@ -84,7 +84,7 @@ DataJack/
 
 ### Prerequisites
 
-- .NET 8 SDK: https://dotnet.microsoft.com/download/dotnet/8.0
+- .NET 10 SDK: https://dotnet.microsoft.com/download/dotnet/10.0
 - No native toolkit libraries required - Avalonia bundles its own rendering layer
 
 Linux only (for packaging scripts, not for building or running):
@@ -103,10 +103,10 @@ sudo dnf install rpm-build
 
 ```bash
 # Restore dependencies and build (debug)
-dotnet build DataJack.sln
+dotnet build DataJack.slnx
 
 # Build release
-dotnet build DataJack.sln -c Release
+dotnet build DataJack.slnx -c Release
 ```
 
 ### Run in Development
@@ -169,16 +169,16 @@ scripts/package/windows/build_installer.ps1 dist/win-x64
 
 ```bash
 # Run all tests
-dotnet test DataJack.sln
+dotnet test DataJack.slnx
 
 # Run with detailed output
-dotnet test DataJack.sln --logger "console;verbosity=detailed"
+dotnet test DataJack.slnx --logger "console;verbosity=detailed"
 
 # Run a specific test project
 dotnet test tests/DataJack.Core.Tests
 
 # Run with coverage (requires coverlet)
-dotnet test DataJack.sln --collect:"XPlat Code Coverage"
+dotnet test DataJack.slnx --collect:"XPlat Code Coverage"
 ```
 
 All tests must pass before committing or opening a pull request. Never suggest a PR with
@@ -280,4 +280,4 @@ Behavioral rules are in `.clauderules`. Key reminders and C#-specific notes:
 
 See PLANNING.md for active goals, open questions, and pending decisions.
 
-Currently in: Phase 0 (Foundation) - no code written yet. Next step is solution scaffolding.
+Currently in: Phase 0 (Foundation). Solution scaffolding complete; next steps are Paths.cs, EventDispatcher, and IRCStateModel skeletons.

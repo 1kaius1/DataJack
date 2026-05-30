@@ -8,8 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Solution scaffolding: DataJack.Core class library, DataJack Avalonia executable, and
+  DataJack.Core.Tests xUnit project wired into DataJack.slnx
+- Minimal Avalonia entry point (Program.cs, App.cs, MainWindow.cs) producing a compiling,
+  launchable application shell targeting .NET 10
+- NuGet references: Avalonia 12.0.4, MoonSharp 2.0.0, Microsoft.Data.Sqlite 10.0.8, xunit 2.9.3
 
 ### Changed
+- Target framework updated to net10.0 (current LTS; .NET 10 SDK is what is installed)
+- Solution file format updated from .sln to .slnx (.NET 10 default XML format)
+- CLAUDE.md updated to reflect net10.0 target, .slnx solution file, and current phase status
 
 ### Deprecated
 
