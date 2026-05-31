@@ -8,6 +8,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCCommandRouter (CommandRouter.cs): translates user slash commands into correctly-formatted
+  IRC protocol lines sent via IRCConnection.SendLineAsync. Phase 1 minimum command set:
+  JoinAsync (with optional key), PartAsync (with optional reason), MsgAsync (PRIVMSG),
+  NoticeAsync (NOTICE), NickAsync, QuitAsync (with optional reason), RawAsync. Each method
+  validates its arguments before sending: channel name prefix and character validity, nick
+  first-character and space/comma checks, target non-empty/no-space check, raw line CR/LF
+  check. All methods accept a CancellationToken as the last parameter.
+- CommandRouterTests: 40 tests covering correct wire format for all 7 commands, optional
+  parameter variants (key/reason/no-reason), all four channel prefix characters (#&+!),
+  all 7 RFC-defined nick-starting special chars ([]\\^_`{|}), and ArgumentException on every
+  invalid-input path (empty args, space in target, digit-leading nick, CR/LF in raw line).
+- ReconnectController (Reconnect.cs): subscribes to ConnectionClosed events and drives
+  reconnection with exponential backoff. Config: 2s initial delay, 2x multiplier, 5-minute
+  cap, +-20% jitter, configurable MaxAttempts (0 = unlimited). Publishes ReconnectScheduled
+  before each delay, ReconnectSucceeded on success, ReconnectFailed when MaxAttempts is
+  exhausted. SemaphoreSlim gate prevents concurrent loops; DisposeAsync cancels any
+  in-flight delay and waits for the loop to exit. CapabilityNegotiator and SaslAuthenticator
+  re-run automatically on reconnect because they subscribe to ConnectionEstablished; channel
+  rejoin is deferred to IRCCommandRouter (Phase 2+). Injectable delay function for testing.
+- IRCConnection.PrepareForReconnectAsync: internal method called by ReconnectController to
+  cancel and await the receive task, dispose the stream, and clear all connection state so
+  ConnectAsync can be called again on the same IRCConnection instance.
+- ReconnectControllerTests: 8 tests covering ReconnectScheduled attempt numbers and delay
+  doubling, ReconnectSucceeded on first success, ReconnectFailed after MaxAttempts
+  exhausted, jitter bounds (+-20% of 10s initial), DisposeAsync cancels an in-flight loop,
+  multi-server isolation (wrong-server close does not start loop), concurrent close events
+  do not start two loops, MaxDelaySeconds cap (100x multiplier stays at cap).
+- Complete typed event vocabulary (Types.cs): added all events from ARCHITECTURE.md s5.2
+  that were not yet defined. New events: BatchReceived (batch type, batch ID, messages list);
+  TopicWhoTime (333 numeric: setter nick, set timestamp); ChannelModeChanged (mode string,
+  params, setter); ChannelCreated (329 numeric: created-at timestamp); UserHostChanged
+  (CHGHOST: new ident/host); UserAwayChanged (AWAY/away-notify: is_away, message);
+  UserAccountChanged (account-notify/extended-join: account); UserRealNameChanged (SETNAME);
+  MonitorStatusChanged (730/731: is_online); WhoReplyEntry (352: channel?, nick, user, host,
+  account?, realname); WhoIsReply (311/312/317/330: assembled whois data); WhoIsEnd (318);
+  BanListEntry (367: mask, setter, set_at); BanListEnd (368); PrivilegeError (482 and
+  related: command, reason).
+- FloodController (FloodControl.cs): token-bucket rate limiter for outbound IRC lines. (FloodControl.cs): token-bucket rate limiter for outbound IRC lines.
+  Configurable burst capacity (default 10 tokens), drain rate (default 2 tokens/sec), and
+  max queue depth (default 50). `SendBypassAsync` sends immediately with no token cost for
+  PONG, PING, QUIT, and server-initiated NOTICEs. `TrySend` enqueues at Normal or CTCP
+  priority; Normal queue is always drained before the CTCP queue; `FloodQueueFull` event
+  is emitted and the line is dropped when the queue is at capacity. Token cost per line:
+  1.0 + 0.1 per full 100 bytes over 200 bytes. `IAsyncDisposable` lifecycle. Configurable
+  per-server via `FloodController.Config`.
+- FloodControllerTests: 14 tests covering cost formula (Theory), bypass path, burst
+  capacity, rate limiting, Normal-before-CTCP priority, FIFO ordering, and queue overflow.
+  Includes a regression test documenting that `BoundedChannelFullMode.DropWrite` returns
+  `true` in .NET 10 even when items are silently discarded; `Wait` mode is used instead.
+- SaslAuthenticator (SaslAuthenticator.cs in caps/): drives the AUTHENTICATE exchange after
+  `CapabilityNegotiated` grants the `sasl` capability. Mechanism preference order per
+  ARCHITECTURE.md §4.3: SCRAM-SHA-512, SCRAM-SHA-256, EXTERNAL, PLAIN (PLAIN only over
+  TLS). Falls back to the next mechanism on 904; handles 908 (available mechanisms list)
+  to skip unsupported options. Publishes `SASLStarted`, `SASLSucceeded`, `SASLFailed`.
+  `SaslCredentials` record type for configuration.
+- ScramSha256Mechanism / ScramSha512Mechanism (Scram.cs): RFC 5802 / RFC 7677 SCRAM
+  implementation using PBKDF2 (Rfc2898DeriveBytes), HMAC-SHA-256/512, and SHA-256/512
+  from System.Security.Cryptography. GS2 channel binding header `n,,` for IRC SASL.
+  Verifies server signature (`v=`) in the server-final message; throws `SaslException` on
+  mismatch (MITM protection). Testable via injected nonce factory.
+- PlainMechanism (Plain.cs): PLAIN mechanism — base64(`\0authcid\0password`). Must only be
+  used over TLS; enforcement is in SaslAuthenticator, not the mechanism itself.
+- ExternalMechanism (External.cs): EXTERNAL mechanism — sends empty payload (AUTHENTICATE +)
+  and relies on the TLS client certificate already presented during the handshake.
+- ISaslMechanism interface and SaslException in ISaslMechanism.cs.
+- SaslTests: 20 tests — 11 mechanism unit tests (SCRAM structure and error cases using RFC
+  7677 inputs with self-consistent server-signature verification, PLAIN payload, EXTERNAL
+  empty response) and 9 SaslAuthenticator integration tests (EXTERNAL full flow, 904
+  fallback, exhaustion → SASLFailed, PLAIN gated to TLS, multi-server isolation).
+- CapabilityNegotiator (Negotiator.cs in caps/): full IRCv3 CAP LS 302 → REQ → ACK/NAK
+  negotiation. Accumulates multiline LS responses; requests the intersection of the 18
+  wanted capabilities and server-advertised capabilities; strips ACK modifier prefixes
+  (-/~/=); handles CAP NAK with graceful fallback; handles cap-notify NEW and DEL for
+  runtime capability changes; publishes `CapabilityNegotiated` and `ServerCapabilityChanged`.
+- CapabilityNegotiatorTests: 10 integration tests covering single-line and multiline LS,
+  ACK with modifier stripping, NAK, no-wanted-caps path, cap-notify NEW (wanted and unknown
+  caps), cap-notify DEL, and multi-server isolation.
+- `IRCConnection.IsTls` property: true when the active connection was established over TLS;
+  used by SaslAuthenticator to gate PLAIN mechanism inclusion.
+
+### Fixed
+- CapabilityNegotiator: replaced `Task.Run` + `SemaphoreSlim` event dispatch with a single
+  `Channel<string?>` drain loop. The previous design could process consecutive CAP LS lines
+  out of order (non-deterministic thread pool scheduling), causing multiline LS accumulation
+  to fail in production when both lines arrived in the same TCP segment. The channel-based
+  drain guarantees FIFO processing. `ConnectionEstablished` is signalled via a `null` item
+  in the same channel to avoid a separate lock on `_serverCaps`.
+
+### Added
 - IRCParser (Parser.cs): subscribes to RawLineReceived; parses full IRCv3 format
   (tags with value unescaping, nick!user@host prefix decomposition, command, params);
   dispatches PRIVMSG/NOTICE/JOIN/PART/KICK/QUIT/NICK/TOPIC/INVITE/WALLOPS/ERROR and

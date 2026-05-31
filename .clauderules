@@ -29,6 +29,11 @@
 - Keep first line under 72 characters
 - Use imperative mood: "add feature" not "added feature"
 - Body lines wrapped at 72 characters
+- Body structure: one paragraph per logical unit of change (implementation,
+  tests, supporting changes), each paragraph introduced by its file/component
+  name followed by a colon. Describe what was added and the key design
+  decisions or constraints -- not a line-by-line diff.
+- Final line: `N tests, N passing, N failing.`
 
 ## Language Preferences
 

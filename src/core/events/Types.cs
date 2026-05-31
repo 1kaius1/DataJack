@@ -84,6 +84,16 @@ public readonly record struct ActionReceived(
 /// <summary>A WALLOPS message arrived.</summary>
 public readonly record struct WallopsReceived(string Server, string FromNick, string Text);
 
+/// <summary>
+/// A batched set of messages completed. Emitted when the closing BATCH END is processed.
+/// Messages is the ordered list of typed events accumulated during the batch.
+/// </summary>
+public readonly record struct BatchReceived(
+    string Server,
+    string BatchType,
+    string BatchId,
+    IReadOnlyList<object> Messages);
+
 // ---------------------------------------------------------------------------
 // Registration events
 // ---------------------------------------------------------------------------
@@ -156,6 +166,24 @@ public readonly record struct TopicChanged(
 /// <summary>An INVITE arrived for the local user.</summary>
 public readonly record struct InviteReceived(string Server, string Channel, string FromNick);
 
+/// <summary>The setter and time of the current topic, from numeric 333.</summary>
+public readonly record struct TopicWhoTime(
+    string Server,
+    string Channel,
+    string SetterNick,
+    DateTimeOffset SetAt);
+
+/// <summary>A MODE change was applied to a channel.</summary>
+public readonly record struct ChannelModeChanged(
+    string Server,
+    string Channel,
+    string ModeString,
+    IReadOnlyList<string> Params,
+    string SetterNick);
+
+/// <summary>The channel creation time was received (numeric 329).</summary>
+public readonly record struct ChannelCreated(string Server, string Channel, DateTimeOffset CreatedAt);
+
 // ---------------------------------------------------------------------------
 // User events
 // ---------------------------------------------------------------------------
@@ -168,6 +196,56 @@ public readonly record struct NickInUse(string Server, string Nick);
 
 /// <summary>A QUIT was processed.</summary>
 public readonly record struct UserQuit(string Server, string Nick, string? Reason);
+
+/// <summary>A CHGHOST was processed; the user's ident/host changed without a rejoin.</summary>
+public readonly record struct UserHostChanged(string Server, string Nick, string NewUser, string NewHost);
+
+/// <summary>An AWAY change was processed (away-notify or 301/305/306 numerics).</summary>
+public readonly record struct UserAwayChanged(string Server, string Nick, bool IsAway, string? Message);
+
+/// <summary>An ACCOUNT change was processed (account-notify or extended-join).</summary>
+public readonly record struct UserAccountChanged(string Server, string Nick, string? Account);
+
+/// <summary>A SETNAME was processed; the user's realname changed.</summary>
+public readonly record struct UserRealNameChanged(string Server, string Nick, string NewRealName);
+
+/// <summary>A MONITOR online/offline reply was received (730/731 numerics).</summary>
+public readonly record struct MonitorStatusChanged(string Server, string Nick, bool IsOnline);
+
+/// <summary>One entry from a WHO reply (numeric 352).</summary>
+public readonly record struct WhoReplyEntry(
+    string Server,
+    string? Channel,
+    string Nick,
+    string User,
+    string Host,
+    string? Account,
+    string RealName);
+
+/// <summary>The full WHOIS reply for a nick (assembled from 311/312/317/330 numerics).</summary>
+public readonly record struct WhoIsReply(
+    string Server,
+    string Nick,
+    string User,
+    string Host,
+    string RealName,
+    string ServerName,
+    int IdleSeconds,
+    string? Account);
+
+/// <summary>The WHOIS reply sequence is complete (numeric 318).</summary>
+public readonly record struct WhoIsEnd(string Server, string Nick);
+
+/// <summary>One entry from a ban list (numeric 367).</summary>
+public readonly record struct BanListEntry(
+    string Server,
+    string Channel,
+    string Mask,
+    string Setter,
+    DateTimeOffset SetAt);
+
+/// <summary>The ban list for a channel is complete (numeric 368).</summary>
+public readonly record struct BanListEnd(string Server, string Channel);
 
 // ---------------------------------------------------------------------------
 // Error and warning events
@@ -187,6 +265,11 @@ public readonly record struct EncodingWarning(
 
 /// <summary>The outbound flood queue exceeded its capacity and messages were dropped.</summary>
 public readonly record struct FloodQueueFull(string Server, int DroppedCount);
+
+/// <summary>
+/// The server denied a privileged command (e.g. 482 "You're not channel operator").
+/// </summary>
+public readonly record struct PrivilegeError(string Server, string Command, string Reason);
 
 /// <summary>A script handler invocation was dropped because the script queue was full.</summary>
 public readonly record struct ScriptInvocationDropped(string ScriptName, string EventType);

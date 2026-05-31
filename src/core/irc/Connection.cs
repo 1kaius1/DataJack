@@ -136,6 +136,33 @@ public sealed class IRCConnection : IAsyncDisposable
     }
 
     /// <summary>
+    /// Reset connection state after a disconnect so that <see cref="ConnectAsync"/> can be
+    /// called again for reconnection. The receive loop must have already exited
+    /// (i.e. a <c>ConnectionClosed</c> event has been published) before calling this.
+    /// </summary>
+    internal async Task PrepareForReconnectAsync()
+    {
+        _receiveCts?.Cancel();
+
+        if (_receiveTask is not null)
+        {
+            try { await _receiveTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            _receiveTask = null;
+        }
+
+        if (_stream is not null)
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+            _stream = null;
+        }
+
+        _receiveCts?.Dispose();
+        _receiveCts = null;
+        _isTls = false;
+    }
+
+    /// <summary>
     /// Send QUIT and close the connection cleanly.
     /// </summary>
     public async Task DisconnectAsync(string reason = "Disconnecting", CancellationToken ct = default)

@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Phase 0 complete. Phase 1 (IRC Core) is next.
+**Status:** Phase 1 (IRC Core) complete. Phase 2 (Minimal Viable UI) is next.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Foundation skeleton is in place and all 15 tests pass on the local build.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). All Phase 1 components are implemented and tested: networking, connection, parsing, capability negotiation, SASL authentication, flood control, reconnect with exponential backoff, IRC command routing, and the complete event vocabulary.
 
 ---
 
@@ -56,16 +56,16 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 ### Phase 1 — IRC Core
 *Connect to a real IRC server, join a channel, send and receive messages.*
 
-- [ ] `NetworkProvider`: TCP and TLS transports; IPv6 dual-stack with happy-eyeballs
-- [ ] `IRCConnection`: raw line I/O on the network thread; PING/PONG handled here before the bus
-- [ ] `IRCParser`: full IRCv3 message format (tags, prefix, command, params, trailing); character encoding layer
-- [ ] Character encoding: UTF-8 default; per-server fallback; per-channel override; invalid bytes → U+FFFD + `EncodingWarning` event
-- [ ] `CapabilityNegotiator`: CAP LS 302 → REQ → ACK/NAK lifecycle; all capabilities in ARCHITECTURE.md §4.2
-- [ ] `SASLAuthenticator`: SCRAM-SHA-512, SCRAM-SHA-256, EXTERNAL (cert-based), PLAIN (TLS-gated only)
-- [ ] `FloodController`: token bucket per connection; priority lanes (PONG/PING/QUIT bypass bucket); configurable parameters
-- [ ] `ReconnectController`: exponential backoff (2s initial, 2× multiplier, 5min cap, ±20% jitter); channel rejoin on reconnect
-- [ ] `IRCCommandRouter`: `/join`, `/part`, `/msg`, `/notice`, `/nick`, `/quit`, `/raw` minimum
-- [ ] Complete typed event vocabulary wired up — all events in ARCHITECTURE.md §5.2
+- [x] `NetworkProvider`: TCP and TLS transports; IPv6 dual-stack with happy-eyeballs
+- [x] `IRCConnection`: raw line I/O on the network thread; PING/PONG handled here before the bus; `IsTls` property
+- [x] `IRCParser`: full IRCv3 message format (tags, prefix, command, params, trailing); character encoding layer
+- [ ] Character encoding: UTF-8 default; per-server fallback; per-channel override; invalid bytes → U+FFFD + `EncodingWarning` event — deferred to `IRCCommandRouter` step when the encode/decode boundary is finalised
+- [x] `CapabilityNegotiator`: CAP LS 302 → REQ → ACK/NAK lifecycle; all capabilities in ARCHITECTURE.md §4.2; cap-notify NEW/DEL; ordered `Channel<string?>` drain loop for correct multiline LS accumulation
+- [x] `SASLAuthenticator`: SCRAM-SHA-512, SCRAM-SHA-256, EXTERNAL (cert-based), PLAIN (TLS-gated only); mechanism fallback queue; server-signature mutual verification for SCRAM
+- [x] `FloodController`: token bucket per connection; priority lanes (PONG/PING/QUIT bypass bucket); Normal/CTCP queues; configurable capacity, drain rate, and max depth; `FloodQueueFull` event
+- [x] `ReconnectController`: exponential backoff (2s initial, 2× multiplier, 5min cap, ±20% jitter); channel rejoin on reconnect
+- [x] `IRCCommandRouter`: `/join`, `/part`, `/msg`, `/notice`, `/nick`, `/quit`, `/raw` minimum
+- [x] Complete typed event vocabulary wired up — all events in ARCHITECTURE.md §5.2
 
 ---
 
