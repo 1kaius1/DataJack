@@ -25,6 +25,7 @@
 ### Commit Messages
 - Follow conventional commits format: `type(scope): description`
 - No emoji in commit messages
+- No em-dashes or en-dashes in commit messages; use regular hyphens only
 - Types: feat, fix, docs, style, refactor, test, chore
 - Keep first line under 72 characters
 - Use imperative mood: "add feature" not "added feature"
