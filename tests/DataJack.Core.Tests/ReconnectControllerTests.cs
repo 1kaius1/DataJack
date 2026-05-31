@@ -257,9 +257,6 @@ public sealed class ReconnectControllerTests : IAsyncDisposable
     [Fact]
     public async Task MultipleConnectionClosed_DoesNotStartConcurrentLoops()
     {
-        var scheduledEvents = new List<ReconnectScheduled>();
-        _dispatcher.Subscribe<ReconnectScheduled>(e => scheduledEvents.Add(e));
-
         int connectAttempts = 0;
         var connection = MakeConnection(_dispatcher, "s", (_, _) =>
         {
@@ -267,29 +264,43 @@ public sealed class ReconnectControllerTests : IAsyncDisposable
             throw new IOException("refused");
         });
 
+        // loopInDelay fires the moment the delay function is entered, guaranteeing
+        // the first loop holds the gate when the second event is published.
+        var loopInDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var delayGate = new SemaphoreSlim(0, 1);
+
+        var failed = new TaskCompletionSource<ReconnectFailed>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.Subscribe<ReconnectFailed>(e => failed.TrySetResult(e));
+
         var cfg = new ReconnectController.Config(
-            InitialDelaySeconds: 0.0,
+            InitialDelaySeconds: 1.0,
             Multiplier: 1.0,
-            MaxDelaySeconds: 0.0,
+            MaxDelaySeconds: 1.0,
             JitterFraction: 0.0,
             MaxAttempts: 1);
 
         await using var rc = new ReconnectController("s", connection, _dispatcher,
             new NetworkEndpoint("h", 6667, false), cfg,
-            (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+            async (ts, ct) =>
+            {
+                loopInDelay.TrySetResult();
+                await delayGate.WaitAsync(ct);
+            });
 
-        // Fire two rapid close events — only one reconnect loop should run.
+        // Fire the first close; the loop starts and blocks inside the delay.
         await _dispatcher.PublishAsync(new ConnectionClosed("s", null), EventPriority.Critical);
+        await loopInDelay.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Fire the second close while the loop holds the gate -- must be dropped.
         await _dispatcher.PublishAsync(new ConnectionClosed("s", null), EventPriority.Critical);
 
-        // Wait for the single loop to exhaust its one attempt.
-        var deadline = Task.Delay(3000);
-        while (connectAttempts == 0 && !deadline.IsCompleted)
-            await Task.Delay(10);
+        // Release the delay so the first loop can attempt to connect and fail.
+        delayGate.Release();
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        await Task.Delay(50); // let any second loop have a chance to run
+        // Brief pause to let any second loop run if the gate was not properly held.
+        await Task.Delay(50);
 
-        // Only one connect attempt should have occurred.
         Assert.Equal(1, connectAttempts);
 
         await connection.DisposeAsync();
