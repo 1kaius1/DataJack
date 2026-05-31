@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Threading.Channels;
 using DataJack.Core.Events;
 using DataJack.Core.Irc;
 
@@ -48,9 +49,12 @@ public sealed class CapabilityNegotiator
     private readonly IRCConnection _connection;
     private readonly EventDispatcher _dispatcher;
 
-    // Serialises concurrent Task.Run handlers so LS accumulation and state
-    // transitions are always single-threaded even when events arrive quickly.
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    // All inbound work (connection-reset signals + raw IRC lines) is funnelled through this
+    // channel so the single consumer task processes them in arrival order. This avoids the
+    // non-determinism of Task.Run for events that have ordering constraints (e.g. multiline LS).
+    // null item = ConnectionEstablished signal (reset and send CAP LS 302).
+    private readonly Channel<string?> _queue = Channel.CreateUnbounded<string?>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly HashSet<string> _serverCaps =
         new(StringComparer.OrdinalIgnoreCase);
@@ -66,52 +70,52 @@ public sealed class CapabilityNegotiator
 
         dispatcher.Subscribe<ConnectionEstablished>(OnConnectionEstablished);
         dispatcher.Subscribe<RawLineReceived>(OnRawLineReceived);
+
+        _ = Task.Run(DrainAsync);
     }
 
     // ---------------------------------------------------------------------------
-    // Event handlers (always synchronous; dispatch work onto thread pool)
+    // Event handlers — just enqueue; ordering is handled by the consumer task
     // ---------------------------------------------------------------------------
 
     private void OnConnectionEstablished(ConnectionEstablished evt)
     {
         if (!evt.Server.Equals(_serverId, StringComparison.Ordinal)) return;
-
-        _ = Task.Run(async () =>
-        {
-            await _lock.WaitAsync().ConfigureAwait(false);
-            try { _serverCaps.Clear(); }
-            finally { _lock.Release(); }
-
-            await _connection.SendLineAsync("CAP LS 302").ConfigureAwait(false);
-        });
+        _queue.Writer.TryWrite(null); // null = reset signal
     }
 
     private void OnRawLineReceived(RawLineReceived evt)
     {
         if (!evt.Server.Equals(_serverId, StringComparison.Ordinal)) return;
+        _queue.Writer.TryWrite(evt.Line);
+    }
 
-        _ = Task.Run(() => ProcessLineAsync(evt.Line));
+    // ---------------------------------------------------------------------------
+    // Single-consumer drain loop — processes items in arrival order
+    // ---------------------------------------------------------------------------
+
+    private async Task DrainAsync()
+    {
+        await foreach (var item in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            if (item is null)
+            {
+                // ConnectionEstablished: reset capability state and start negotiation
+                _serverCaps.Clear();
+                await _connection.SendLineAsync("CAP LS 302").ConfigureAwait(false);
+                continue;
+            }
+
+            var msg = IRCParser.ParseMessage(item);
+            if (msg is null || msg.Value.Command != "CAP") continue;
+
+            await HandleCapAsync(msg.Value).ConfigureAwait(false);
+        }
     }
 
     // ---------------------------------------------------------------------------
     // CAP line processing
     // ---------------------------------------------------------------------------
-
-    private async Task ProcessLineAsync(string line)
-    {
-        var msg = IRCParser.ParseMessage(line);
-        if (msg is null || msg.Value.Command != "CAP") return;
-
-        await _lock.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            await HandleCapAsync(msg.Value).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
 
     private Task HandleCapAsync(IrcMessage msg) =>
         msg.Param(1).ToUpperInvariant() switch

@@ -35,6 +35,10 @@ public sealed class IRCConnection : IAsyncDisposable
     private Task? _receiveTask;
     private CancellationTokenSource? _receiveCts;
     private bool _disposed;
+    private bool _isTls;
+
+    /// <summary>True when the active connection is over TLS; false for plaintext or when disconnected.</summary>
+    public bool IsTls => _isTls;
 
     /// <param name="serverId">
     /// Stable identifier for this server (network name or address string), used as the
@@ -82,6 +86,8 @@ public sealed class IRCConnection : IAsyncDisposable
                 EventPriority.Critical).ConfigureAwait(false);
             throw;
         }
+
+        _isTls = endpoint.UseTls;
 
         await _dispatcher.PublishAsync(
             new ConnectionEstablished(_serverId),
