@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCParser (Parser.cs): subscribes to RawLineReceived; parses full IRCv3 format
+  (tags with value unescaping, nick!user@host prefix decomposition, command, params);
+  dispatches PRIVMSG/NOTICE/JOIN/PART/KICK/QUIT/NICK/TOPIC/INVITE/WALLOPS/ERROR and
+  numerics 001/372/376/433 as typed events; CTCP ACTION dispatches ActionReceived,
+  other CTCP dispatches CtcpRequest/CtcpReply; server-filtered per serverId
+- IrcMessage internal struct with Param(index) safe accessor
+- Encoder.cs Phase 1 placeholder stub
+- Phase 1 event types added to Types.cs: WelcomeReceived, MOTDReceived, MOTDEnd,
+  CapabilityNegotiated, ServerCapabilityChanged, SASLStarted, SASLSucceeded, SASLFailed,
+  JoinedChannel, PartedChannel, KickReceived, TopicChanged, InviteReceived, NickChanged,
+  NickInUse, UserQuit, WallopsReceived
+- IrcParserTests: 21 tests covering pure parse logic (tags, prefix, params, numerics)
+  and 5 integration tests through the full dispatcher pipeline
 - IRCConnection (Connection.cs): raw line I/O over any INetworkProvider stream; PING answered
   before the event bus to prevent latency-induced disconnects; publishes ConnectionAttempted,
   ConnectionEstablished, ConnectionFailed, ConnectionClosed, RawLineReceived, RawLineSent;
