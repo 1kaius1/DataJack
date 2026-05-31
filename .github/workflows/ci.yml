@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Run all platforms even if one fails so we see the full cross-platform picture.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          # Cache the NuGet package store keyed on the set of .csproj files.
+          # A restore is only needed when package references change.
+          cache: true
+          cache-dependency-path: "**/*.csproj"
+
+      - name: Restore
+        run: dotnet restore DataJack.slnx
+
+      - name: Build
+        run: dotnet build DataJack.slnx -c Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test DataJack.slnx
+          -c Release
+          --no-build
+          --verbosity normal
+          --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        # Upload even on failure so results are available for diagnosis.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: "**/*.trx"
+          if-no-files-found: warn
