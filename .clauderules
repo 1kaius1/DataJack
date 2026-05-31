@@ -25,10 +25,19 @@
 ### Commit Messages
 - Follow conventional commits format: `type(scope): description`
 - No emoji in commit messages
+- No em-dashes or en-dashes in commit messages; use regular hyphens only
 - Types: feat, fix, docs, style, refactor, test, chore
 - Keep first line under 72 characters
 - Use imperative mood: "add feature" not "added feature"
 - Body lines wrapped at 72 characters
+- Body structure: one prose paragraph per logical unit of change; each
+  paragraph explains what was built and the key design decisions or
+  constraints behind it. Bullet lists are acceptable within a paragraph
+  where they add clarity (e.g. listing platform variants or config
+  options), but the paragraph itself must not be reduced to a flat list
+  of file names. Do not use "ComponentName:" headers to introduce
+  paragraphs.
+- Final line: `dotnet test DataJack.slnx: N passed, N failed.`
 
 ## Language Preferences
 
