@@ -27,7 +27,7 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 
 ## Stack
 
-**C# (.NET 8+) with Avalonia UI.** Documented and justified in ARCHITECTURE.md §1.
+**C# (.NET 10) with Avalonia UI.** Documented and justified in ARCHITECTURE.md §1.
 
 | Dependency | Purpose |
 |-----------|---------|

@@ -48,7 +48,7 @@ No runtime dependencies. All packages are self-contained.
 
 ### Building from source
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - git
 
 No native toolkit libraries are required. Avalonia bundles its own rendering layer.
@@ -98,7 +98,7 @@ Run `DataJack_setup.exe` and follow the installer.
 ```bash
 git clone https://github.com/1kaius1/DataJack.git
 cd DataJack
-dotnet build DataJack.sln -c Release
+dotnet build DataJack.slnx -c Release
 dotnet run --project src/DataJack
 ```
 

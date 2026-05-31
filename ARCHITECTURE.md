@@ -22,7 +22,7 @@
 
 # 1. Stack Decision
 
-**Chosen stack: C# (.NET 8+) with Avalonia UI**
+**Chosen stack: C# (.NET 10) with Avalonia UI**
 
 This is not a deferral. The stack choice is a foundational constraint that every other architectural decision inherits, so it is resolved here first.
 

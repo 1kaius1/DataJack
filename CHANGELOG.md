@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account?, realname); WhoIsReply (311/312/317/330: assembled whois data); WhoIsEnd (318);
   BanListEntry (367: mask, setter, set_at); BanListEnd (368); PrivilegeError (482 and
   related: command, reason).
-- FloodController (FloodControl.cs): token-bucket rate limiter for outbound IRC lines. (FloodControl.cs): token-bucket rate limiter for outbound IRC lines.
+- FloodController (FloodControl.cs): token-bucket rate limiter for outbound IRC lines.
   Configurable burst capacity (default 10 tokens), drain rate (default 2 tokens/sec), and
   max queue depth (default 50). `SendBypassAsync` sends immediately with no token cost for
   PONG, PING, QUIT, and server-initiated NOTICEs. `TrySend` enqueues at Normal or CTCP
@@ -89,6 +89,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used by SaslAuthenticator to gate PLAIN mechanism inclusion.
 
 ### Fixed
+- CI test step: replaced `--no-build` with `--no-restore`. The `--no-build` flag
+  requires the test assembly to already exist on disk; when the build step had not produced
+  it, VSTest reported "The argument ... is invalid" instead of a build error, masking the
+  real failure. The `--no-restore` flag preserves the pipeline intent (packages already
+  restored in the Restore step) while allowing the test step to compile the assembly itself
+  if the artifact is absent or stale.
+- `MultipleConnectionClosed_DoesNotStartConcurrentLoops` test rewritten to be
+  deterministic. The original version used a zero-delay synchronous delay function; the
+  entire reconnect loop could complete before the second `ConnectionClosed` event was
+  published, allowing a second loop to start after the gate was released. The test now uses
+  a `TaskCompletionSource` (`loopInDelay`) to confirm the loop has entered its delay before
+  the second event fires, and a `SemaphoreSlim` (`delayGate`) to keep the loop blocked
+  until the test releases it. No changes to `ReconnectController` -- the gate logic was
+  correct.
 - CapabilityNegotiator: replaced `Task.Run` + `SemaphoreSlim` event dispatch with a single
   `Channel<string?>` drain loop. The previous design could process consecutive CAP LS lines
   out of order (non-deterministic thread pool scheduling), causing multiline LS accumulation
