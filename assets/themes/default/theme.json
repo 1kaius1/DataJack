@@ -1,0 +1,41 @@
+{
+  "name": "Default Dark",
+  "irc_colors": [
+    "#FFFFFF",
+    "#000000",
+    "#00007F",
+    "#009300",
+    "#FF0000",
+    "#7F0000",
+    "#9C009C",
+    "#FC7F00",
+    "#FFFF00",
+    "#00FC00",
+    "#009393",
+    "#00FFFF",
+    "#0000FC",
+    "#FF00FF",
+    "#7F7F7F",
+    "#D2D2D2"
+  ],
+  "chrome": {
+    "background":            "#1E1E2E",
+    "foreground":            "#CDD6F4",
+    "nicklist_bg":           "#181825",
+    "input_bg":              "#313244",
+    "input_fg":              "#CDD6F4",
+    "tab_bg":                "#181825",
+    "tab_fg":                "#6C7086",
+    "tab_active_bg":         "#313244",
+    "tab_active_fg":         "#CDD6F4",
+    "tab_unread_fg":         "#89B4FA",
+    "status_bar_bg":         "#181825",
+    "status_bar_fg":         "#6C7086",
+    "nick_group_header_fg":  "#585B70",
+    "selection_bg":          "#45475A",
+    "link_fg":               "#89DCEB"
+  },
+  "font_family": null,
+  "font_size": null,
+  "timestamp_fmt": "HH:mm"
+}

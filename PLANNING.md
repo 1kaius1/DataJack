@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Phase 1 (IRC Core) complete. Phase 2 (Minimal Viable UI) is next.
+**Status:** Phase 2 (Minimal Viable UI) complete. Phase 3 (HexChat Feature Parity) is next.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). All Phase 1 components are implemented and tested: networking, connection, parsing, capability negotiation, SASL authentication, flood control, reconnect with exponential backoff, IRC command routing, and the complete event vocabulary.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). All Phase 1 and Phase 2 components are implemented and tested.
 
 ---
 
@@ -72,15 +72,15 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 ### Phase 2 — Minimal Viable UI
 *A usable chat interface.*
 
-- [ ] `BufferManager`: create/destroy buffers; all buffer types from ARCHITECTURE.md §6.1
-- [ ] `MessageView`: non-virtualized scrollback (virtualization is Phase 4); `IRCTextRenderer` (mIRC color codes 0–99, bold, italic, underline, strikethrough, monospace, reverse, hex color, URL detection, nick coloring)
-- [ ] `InputBox`: command vs. message detection; per-buffer history (Up/Down); nick tab completion
-- [ ] `NicklistPanel`: grouped by mode prefix (owners → admins → ops → halfops → voiced → none); `multi-prefix` support; right-click context menu
-- [ ] `LayoutManager`: tab bar (HexChat-style) only — tree view and splits are Phase 4
-- [ ] `ThemeManager`: load `theme.json` from disk; built-in default theme compiled in as fallback
-- [ ] Basic `ServerListDialog`: add/edit/delete server entries; auto-connect on launch
-- [ ] `BufferLogWriter`: append-only per-buffer log files; tab-delimited format (timestamp, nick, type, text)
-- [ ] Configuration system: scoped settings (global → server → channel); schema v1; read/write; versioned migrations
+- [x] `BufferManager`: create/destroy buffers; all buffer types from ARCHITECTURE.md §6.1
+- [x] `MessageView`: non-virtualized scrollback (virtualization is Phase 4); `IRCTextRenderer` (mIRC color codes 0-99, bold, italic, underline, strikethrough, monospace, reverse, hex color, URL detection, nick coloring)
+- [x] `InputBox`: command vs. message detection; per-buffer history (Up/Down); nick tab completion
+- [x] `NicklistPanel`: grouped by mode prefix (owners -> admins -> ops -> halfops -> voiced -> none); `multi-prefix` support; right-click context menu
+- [x] `LayoutManager`: tab bar (HexChat-style) only -- tree view and splits are Phase 4
+- [x] `ThemeManager`: load `theme.json` from disk; built-in default theme compiled in as fallback
+- [x] Basic `ServerListDialog`: add/edit/delete server entries; auto-connect on launch
+- [x] `BufferLogWriter`: append-only per-buffer log files; tab-delimited format (timestamp, nick, type, text)
+- [x] Configuration system: scoped settings (global -> server -> channel); schema v1; read/write; versioned migrations
 
 ---
 

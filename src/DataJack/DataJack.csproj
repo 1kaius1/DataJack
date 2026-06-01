@@ -17,6 +17,12 @@
     <Compile Include="../ui/**/*.cs" />
   </ItemGroup>
 
+  <!-- Embed the built-in default theme so it is always available as a fallback. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../assets/themes/default/theme.json"
+                      LogicalName="DataJack.Assets.default.theme.json" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../DataJack.Core/DataJack.Core.csproj" />
   </ItemGroup>
