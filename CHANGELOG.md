@@ -8,6 +8,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Configuration system (storage/config): AppConfig versioned schema (schema_version=1)
+  with IdentitySettings, ServerEntry, SaslCredentials, AppearanceSettings, LoggingSettings,
+  AdvancedSettings records. ConfigLoader reads/writes settings.json with atomic rename-on-save
+  and a sequential migration runner (v1 initial schema). SettingsScope resolves the
+  global -> server scope chain for nick, username, realname, encoding, SASL, and all
+  appearance/logging/advanced settings with explicit per-scope override semantics.
+- IrcTextParser (core/irc/TextParser.cs): pure parsing logic (no UI dependency) that
+  converts a raw IRC message string into IrcSpan[] with per-span Bold, Italic, Underline,
+  Strikethrough, Monospace, Reverse, and IrcColor (palette index or 24-bit hex) fields.
+  Handles all mIRC control codes (x02, x03, x04, x0F, x11, x16, x1D, x1E, x1F), the full
+  99-color mIRC palette (16 theme-defined + 83 fixed extended colors per the IRCv3 spec),
+  and IRCv3 hex color (x04RRGGBB[,RRGGBB]). URL detection splits spans so URLs are always
+  their own IrcSpan with the Url field set. GetExtendedColorRgb(int) exposes the fixed
+  extended palette for the rendering layer.
+- Theme system (ui/themes): ThemeData and ChromeColors records (theme.json schema) covering
+  the 16-entry IRC color palette, 15 UI chrome colors, font family/size, and timestamp
+  format. ThemeManager loads from the user theme directory (Paths.ThemesDirectory/<name>),
+  falls back to the built-in default theme compiled in as an EmbeddedResource, and hot-reloads
+  via FileSystemWatcher without restart. Default dark theme (assets/themes/default/theme.json)
+  uses a Catppuccin Mocha color palette.
+- Buffer system (ui/buffers): BufferKind enum (NetworkStatus, ServerStatus, Channel, Query,
+  DccChat, Notices, RawLog, Highlights), MessageEntry readonly record struct, MessageKind
+  enum, IBuffer interface, BufferBase abstract class. Concrete types: NetworkStatusBuffer,
+  ServerStatusBuffer, ChannelBuffer (with Topic and Members), QueryBuffer, NoticesBuffer,
+  RawLogBuffer, HighlightsBuffer, ChannelMember record. BufferManager subscribes to 19 IRC
+  events (connection, registration, channel, message, nick, topic, raw) and routes each to
+  the correct buffer, creating buffers on demand. Raises BufferCreated, BufferDestroyed,
+  MessageAdded events for the UI layer.
+- BufferLogWriter (storage/logs/Writer.cs): append-only per-buffer log writer with a bounded
+  Channel queue (default 4096 depth) and a dedicated background write task. Log format:
+  ISO8601 timestamp TAB nick TAB kind TAB text, one line per message. One file per buffer
+  per calendar day under <logdir>/<server>/<date>_<buffer>.log; handles file rotation at
+  midnight; atomic double-dispose guard via Interlocked.Exchange.
+- IrcTextRenderer (ui/rendering/IrcTextRenderer.cs): Avalonia rendering wrapper that converts
+  IrcSpan[] (from IrcTextParser) into Avalonia Inline elements. Applies bold/italic/underline/
+  strikethrough/monospace font properties, SolidColorBrush for foreground/background (resolving
+  palette indices through ThemeManager and extended colors through IrcTextParser), reverse video
+  swap, and underlined link color for URL spans. RenderNick() produces consistently hashed
+  nick colors from an 8-color palette.
+- MessageView (ui/rendering/MessageView.cs): non-virtualized scrollback ScrollViewer + StackPanel
+  (Phase 4 will add virtualization). Each message row shows timestamp, nick (colored via
+  IrcTextRenderer.RenderNick for Normal messages, plain label for events), and IRC-formatted
+  body text. Routing kind to event label text and brush. URL clicks raise UrlClicked event.
+  SetBuffer() switches the active buffer; ApplyTheme() redraws on theme change.
+- NicklistPanel (ui/rendering/Nicklist.cs): channel member list grouped by highest mode
+  prefix (owners ~ admins & ops @ halfops % voiced + users) with case-insensitive
+  alphabetical sort within each group. Right-click context menu for whois, query, op, deop,
+  voice, devoice, kick, ban, ignore actions via NickAction event. Hover highlight.
+- InputBox (ui/layout/InputBox.cs): single-line text entry with '/' command detection,
+  per-buffer circular history ring (depth 100, Up/Down navigation, draft save), and Tab
+  nick+command completion (sorted candidate cycling). Raises CommandSubmitted or
+  MessageSubmitted on Enter.
+- LayoutManager (ui/layout/LayoutManager.cs): main window Grid layout. Tab strip (top) +
+  MessageView (center) + NicklistPanel (right, channel-only) + InputBox + status bar (bottom).
+  Reacts to BufferManager.BufferCreated/BufferDestroyed to add/remove TabItems; shows unread
+  tab indicator via foreground color. CommandIssued and MessageIssued events route to
+  MainWindow. Tab selection drives buffer activation via TabControl.SelectionChanged.
+- ServerListDialog (ui/dialogs/ServerList.cs): modal Window with a list/edit split layout.
+  Displays all server entries; Add/Remove buttons manage the list; edit form covers network
+  name, address, port, TLS, password, nick override, auto-join channels, auto-connect toggle.
+  Save/Connect/Cancel actions; ConnectRequested event for immediate connection; config is
+  persisted on close via ConfigLoader.UpdateAsync.
+- MainWindow.cs: wires the full Phase 2 component graph (ConfigLoader -> ThemeManager ->
+  EventDispatcher -> BufferManager -> LayoutManager). Loads config and theme asynchronously
+  after window open; auto-connects servers with AutoConnect=true; routes /connect and
+  /server commands to connection management; opens ServerListDialog on /serverlist; hot-reloads
+  theme on ThemeChanged.
+- ConfigTests (33 tests): AppConfig default values and schema version; ConfigLoader
+  missing-file creation, round-trip persistence, atomic save (no .tmp left behind);
+  ServerEntry.New defaults and unique IDs; SettingsScope global vs. server override,
+  unknown server fallback, encoding scope.
+- IrcTextParserTests (26 tests): plain text, empty, all eight formatting codes (bold,
+  italic, underline, strikethrough, monospace, reverse, reset, mixed), mIRC color with
+  1- and 2-digit index and fg+bg pair, bare color reset, IRCv3 hex color with and without
+  background, URL detection/splitting in middle of text and irc:// scheme, plain text URL
+  absence, extended palette index 16 and 98 and out-of-range.
+- BufferLogWriterTests (7 tests): GetLogPath is under log directory and contains date;
+  different server/buffer/date paths are distinct; slash in buffer ID is replaced in
+  filename; Log writes and flushes a line; 10 entries all persisted; four-field TSV format
+  with correct nick/kind/text; null nick writes hyphen; append mode does not truncate.
+
+
 - IRCCommandRouter (CommandRouter.cs): translates user slash commands into correctly-formatted
   IRC protocol lines sent via IRCConnection.SendLineAsync. Phase 1 minimum command set:
   JoinAsync (with optional key), PartAsync (with optional reason), MsgAsync (PRIVMSG),
