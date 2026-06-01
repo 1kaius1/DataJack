@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCv3 capability handlers (core/caps/handlers/): one file per capability.
+  CapabilityRegistry tracks active capabilities (from CapabilityNegotiated /
+  ServerCapabilityChanged) and the local nick (from WelcomeReceived /
+  NickChanged); active set is cleared on ConnectionEstablished so stale caps
+  are not visible during reconnect. ServerTimeHandler wraps the registry and
+  provides GetTimestamp(tags) which returns the parsed 'time' tag value when
+  server-time is active, falling back to DateTimeOffset.UtcNow otherwise.
+  EchoMessageHandler provides IsEchoedMessage(nick) for UI callers to detect
+  server echoes of the client's own messages when echo-message is active.
+  MonitorHandler manages the MONITOR watchlist: AddNickAsync / RemoveNickAsync
+  / ClearAsync send MONITOR +/-/C protocol lines when the monitor cap is active;
+  the watchlist is re-sent automatically on CapabilityNegotiated (covers
+  reconnects). BatchHandler subscribes to RawLineReceived and processes
+  batch-tagged lines directly (bypassing the main parser's async queue) to
+  guarantee correct accumulation order; BATCH +/- lines start and end batches;
+  PRIVMSG / ACTION / NOTICE lines tagged with batch= are accumulated per batch
+  ID; BatchReceived is emitted on BATCH -. LabeledResponseHandler tracks the
+  labeled-response cap and generates unique hex label strings via TryCreateLabel().
+- 31 new handler tests (tests/DataJack.Core.Tests/CapabilityHandlersTests.cs)
+  covering all handlers: registry cap tracking, local-nick tracking, nick-change
+  filtering, server-time timestamp selection, echo-message nick matching,
+  monitor send / dedup / clear / reconnect resubscription, batch accumulation
+  (PRIVMSG, ACTION, Notice, multi-batch, unknown-id guard), labeled-response
+  label generation.
+
 - IRCParser phase-3 numerics and IRCv3 protocol commands
   (core/irc/Parser.cs): switched from Task.Run to a single sequential
   channel drain loop (same pattern as CapabilityNegotiator) so multi-line

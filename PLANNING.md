@@ -87,9 +87,20 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 ### Phase 3 — HexChat Feature Parity
 *A daily-driveable client matching HexChat's feature set.*
 
-- [ ] Full IRCv3 capability handlers (`/core/caps/handlers/` — one file per capability)
-- [ ] `server-time` tag used for all displayed timestamps
-- [ ] `monitor` capability for nick online/offline tracking; `MonitorStatusChanged` events
+- [x] Extended `IRCParser` with all Phase 3 numerics and IRCv3 protocol commands (005 ISUPPORT,
+  311/312/317/318/330 WHOIS assembly, 315/352 WHO, 322/323 LIST, 329 creation time, 332/333
+  TOPIC, 353/366 NAMES, 367/368 ban list, 730/731 MONITOR, MODE, AWAY, CHGHOST, ACCOUNT,
+  SETNAME); switched to sequential channel drain loop for in-order multi-line reply assembly.
+  New event types: IsupportTokensReceived, ChannelListEntry, ChannelListEnd, NamesEntry,
+  NamesListReceived, UserModeChanged, WhoEnd. TopicChanged.SetterNick is now string?.
+- [x] Full IRCv3 capability handlers (`/core/caps/handlers/` — one file per capability):
+  CapabilityRegistry (active-cap + local-nick state); ServerTimeHandler (timestamp resolution);
+  EchoMessageHandler (IsEchoedMessage predicate); MonitorHandler (watchlist + MONITOR protocol);
+  BatchHandler (BATCH +/- accumulation, emits BatchReceived); LabeledResponseHandler (label
+  generation; full correlation is Phase 4).
+- [x] `server-time` tag used for all displayed timestamps (ServerTimeHandler.GetTimestamp)
+- [x] `monitor` capability for nick online/offline tracking; `MonitorStatusChanged` events
+  (730/731 in parser; MonitorHandler manages watchlist and reconnect resubscription)
 - [ ] Full `IRCStateModel`: topic + who/time, away status, account names, ISUPPORT tokens
 - [ ] Full built-in command set (ARCHITECTURE.md §13): `/kick`, `/ban`, `/mode`, `/op`, `/voice`, `/whois`, `/who`, `/ignore`, `/list`, `/names`, `/timer`, `/help`, etc.
 - [ ] Alias system: `/alias` command; `%1`/`%*` substitution; stored in config
