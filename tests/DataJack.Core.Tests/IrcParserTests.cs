@@ -222,5 +222,391 @@ public sealed class IrcParserTests : IAsyncDisposable
         Assert.False(fired);
     }
 
+    // ---------------------------------------------------------------------------
+    // Phase 3 numeric and command handlers
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Parser_005_DispatchesIsupportTokensReceived()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<IsupportTokensReceived>();
+        _dispatcher.Subscribe<IsupportTokensReceived>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 005 me NETWORK=Libera PREFIX=(ov)@+ MODES=5 :are supported by this server"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("libera", evt.Server);
+        Assert.Equal("Libera", evt.Tokens["NETWORK"]);
+        Assert.Equal("(ov)@+", evt.Tokens["PREFIX"]);
+        Assert.Equal("5", evt.Tokens["MODES"]);
+        Assert.False(evt.Tokens.ContainsKey("are supported by this server"));
+    }
+
+    [Fact]
+    public async Task Parser_Whois_AssemblesMultipleNumericsIntoWhoIsReply()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var replytcs = new TaskCompletionSource<WhoIsReply>();
+        var endtcs   = new TaskCompletionSource<WhoIsEnd>();
+        _dispatcher.Subscribe<WhoIsReply>(e => replytcs.TrySetResult(e));
+        _dispatcher.Subscribe<WhoIsEnd>(e => endtcs.TrySetResult(e));
+
+        // Send 311, 312, 317, 330, then 318
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 311 me alice alice irc.example.com * :Alice Smith"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 312 me alice irc.libera.chat :Libera IRC"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 317 me alice 120 1700000000 :seconds idle, signon time"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 330 me alice AliceAccount :is logged in as"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 318 me alice :End of /WHOIS list"));
+
+        var reply = await replytcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var end   = await endtcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal("alice",         reply.Nick);
+        Assert.Equal("alice",         reply.User);
+        Assert.Equal("irc.example.com", reply.Host);
+        Assert.Equal("Alice Smith",   reply.RealName);
+        Assert.Equal("irc.libera.chat", reply.ServerName);
+        Assert.Equal(120,             reply.IdleSeconds);
+        Assert.Equal("AliceAccount",  reply.Account);
+        Assert.Equal("alice",         end.Nick);
+    }
+
+    [Fact]
+    public async Task Parser_318_WithoutPrior311_OnlyEmitsWhoIsEnd()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        bool replyFired = false;
+        var endtcs = new TaskCompletionSource<WhoIsEnd>();
+        _dispatcher.Subscribe<WhoIsReply>(_ => replyFired = true);
+        _dispatcher.Subscribe<WhoIsEnd>(e => endtcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 318 me ghost :End of /WHOIS list"));
+
+        var end = await endtcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("ghost", end.Nick);
+        Assert.False(replyFired);
+    }
+
+    [Fact]
+    public async Task Parser_352_DispatchesWhoReplyEntry()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<WhoReplyEntry>();
+        _dispatcher.Subscribe<WhoReplyEntry>(e => tcs.TrySetResult(e));
+
+        // Fields (all distinct): channel  user        host                server          nick     status hops+realname
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 352 me #test bobuser bobhost.example irc.libera.chat bobnick H :0 Bob Smith"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("libera",          evt.Server);
+        Assert.Equal("#test",           evt.Channel);
+        Assert.Equal("bobnick",         evt.Nick);
+        Assert.Equal("bobuser",         evt.User);
+        Assert.Equal("bobhost.example", evt.Host);
+        Assert.Equal("Bob Smith",       evt.RealName);
+    }
+
+    [Fact]
+    public async Task Parser_315_DispatchesWhoEnd()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<WhoEnd>();
+        _dispatcher.Subscribe<WhoEnd>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 315 me #test :End of /WHO list"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test", evt.Target);
+    }
+
+    [Fact]
+    public async Task Parser_332_DispatchesTopicChanged_NullSetter()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<TopicChanged>();
+        _dispatcher.Subscribe<TopicChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 332 me #test :Welcome to the channel"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test",                  evt.Channel);
+        Assert.Equal("Welcome to the channel", evt.NewTopic);
+        Assert.Null(evt.SetterNick);
+    }
+
+    [Fact]
+    public async Task Parser_333_DispatchesTopicWhoTime()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<TopicWhoTime>();
+        _dispatcher.Subscribe<TopicWhoTime>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 333 me #test alice 1700000000"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test",              evt.Channel);
+        Assert.Equal("alice",              evt.SetterNick);
+        Assert.Equal(1700000000,           evt.SetAt.ToUnixTimeSeconds());
+    }
+
+    [Fact]
+    public async Task Parser_353_366_DispatchesNamesListReceived()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<NamesListReceived>();
+        _dispatcher.Subscribe<NamesListReceived>(e => tcs.TrySetResult(e));
+
+        // Two 353 lines followed by 366
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 353 me = #test :@alice +bob carol"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 353 me = #test :@dave"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 366 me #test :End of /NAMES list"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test", evt.Channel);
+        Assert.Equal(4, evt.Users.Count);
+
+        var alice = evt.Users.First(u => u.Nick == "alice");
+        Assert.Contains('@', alice.Prefixes);
+
+        var bob = evt.Users.First(u => u.Nick == "bob");
+        Assert.Contains('+', bob.Prefixes);
+
+        var carol = evt.Users.First(u => u.Nick == "carol");
+        Assert.Empty(carol.Prefixes);
+
+        var dave = evt.Users.First(u => u.Nick == "dave");
+        Assert.Contains('@', dave.Prefixes);
+    }
+
+    [Fact]
+    public async Task Parser_367_368_DispatchesBanListEvents()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var entryTcs = new TaskCompletionSource<BanListEntry>();
+        var endTcs   = new TaskCompletionSource<BanListEnd>();
+        _dispatcher.Subscribe<BanListEntry>(e => entryTcs.TrySetResult(e));
+        _dispatcher.Subscribe<BanListEnd>(e => endTcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 367 me #test *!*@badhost.example setter 1700000000"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 368 me #test :End of channel ban list"));
+
+        var entry = await entryTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test",               entry.Channel);
+        Assert.Equal("*!*@badhost.example", entry.Mask);
+        Assert.Equal("setter",              entry.Setter);
+        Assert.Equal(1700000000,            entry.SetAt.ToUnixTimeSeconds());
+
+        var end = await endTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test", end.Channel);
+    }
+
+    [Fact]
+    public async Task Parser_329_DispatchesChannelCreated()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<ChannelCreated>();
+        _dispatcher.Subscribe<ChannelCreated>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 329 me #test 1700000000"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test",      evt.Channel);
+        Assert.Equal(1700000000,   evt.CreatedAt.ToUnixTimeSeconds());
+    }
+
+    [Fact]
+    public async Task Parser_322_323_DispatchesChannelListEvents()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var entryTcs = new TaskCompletionSource<ChannelListEntry>();
+        var endTcs   = new TaskCompletionSource<ChannelListEnd>();
+        _dispatcher.Subscribe<ChannelListEntry>(e => entryTcs.TrySetResult(e));
+        _dispatcher.Subscribe<ChannelListEnd>(e => endTcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 322 me #test 42 :A test channel"));
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 323 me :End of /LIST"));
+
+        var entry = await entryTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test",          entry.Channel);
+        Assert.Equal(42,               entry.UserCount);
+        Assert.Equal("A test channel", entry.Topic);
+
+        await endTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task Parser_730_DispatchesMonitorStatusChanged_Online()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<MonitorStatusChanged>();
+        _dispatcher.Subscribe<MonitorStatusChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 730 me :alice!alice@host.example"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("alice", evt.Nick);
+        Assert.True(evt.IsOnline);
+    }
+
+    [Fact]
+    public async Task Parser_731_DispatchesMonitorStatusChanged_Offline()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<MonitorStatusChanged>();
+        _dispatcher.Subscribe<MonitorStatusChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat 731 me :bob"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("bob",  evt.Nick);
+        Assert.False(evt.IsOnline);
+    }
+
+    [Fact]
+    public async Task Parser_ChannelMode_DispatchesChannelModeChanged()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<ChannelModeChanged>();
+        _dispatcher.Subscribe<ChannelModeChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":alice!alice@host MODE #test +o bob"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("#test", evt.Channel);
+        Assert.Equal("+o",    evt.ModeString);
+        Assert.Equal("bob",   evt.Params[0]);
+        Assert.Equal("alice", evt.SetterNick);
+    }
+
+    [Fact]
+    public async Task Parser_UserMode_DispatchesUserModeChanged()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserModeChanged>();
+        _dispatcher.Subscribe<UserModeChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":irc.libera.chat MODE mynick +i"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("mynick", evt.Nick);
+        Assert.Equal("+i",     evt.ModeString);
+    }
+
+    [Fact]
+    public async Task Parser_AWAY_SetAway_DispatchesUserAwayChanged_True()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserAwayChanged>();
+        _dispatcher.Subscribe<UserAwayChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":carol!carol@host AWAY :Be right back"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("carol",          evt.Nick);
+        Assert.True(evt.IsAway);
+        Assert.Equal("Be right back",  evt.Message);
+    }
+
+    [Fact]
+    public async Task Parser_AWAY_NoParam_DispatchesUserAwayChanged_False()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserAwayChanged>();
+        _dispatcher.Subscribe<UserAwayChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":carol!carol@host AWAY"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("carol", evt.Nick);
+        Assert.False(evt.IsAway);
+        Assert.Null(evt.Message);
+    }
+
+    [Fact]
+    public async Task Parser_CHGHOST_DispatchesUserHostChanged()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserHostChanged>();
+        _dispatcher.Subscribe<UserHostChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":dave!olduser@oldhost CHGHOST newuser newhost.example"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("dave",            evt.Nick);
+        Assert.Equal("newuser",         evt.NewUser);
+        Assert.Equal("newhost.example", evt.NewHost);
+    }
+
+    [Fact]
+    public async Task Parser_ACCOUNT_DispatchesUserAccountChanged_WithAccount()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserAccountChanged>();
+        _dispatcher.Subscribe<UserAccountChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":eve!eve@host ACCOUNT EveServices"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("eve",         evt.Nick);
+        Assert.Equal("EveServices", evt.Account);
+    }
+
+    [Fact]
+    public async Task Parser_ACCOUNT_Star_DispatchesUserAccountChanged_NullAccount()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserAccountChanged>();
+        _dispatcher.Subscribe<UserAccountChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":eve!eve@host ACCOUNT *"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(evt.Account);
+    }
+
+    [Fact]
+    public async Task Parser_SETNAME_DispatchesUserRealNameChanged()
+    {
+        var parser = new IRCParser("libera", _dispatcher);
+        var tcs = new TaskCompletionSource<UserRealNameChanged>();
+        _dispatcher.Subscribe<UserRealNameChanged>(e => tcs.TrySetResult(e));
+
+        await _dispatcher.PublishAsync(new RawLineReceived("libera",
+            ":frank!frank@host SETNAME :Frank The New Name"));
+
+        var evt = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("frank",              evt.Nick);
+        Assert.Equal("Frank The New Name", evt.NewRealName);
+    }
+
     public async ValueTask DisposeAsync() => await _dispatcher.DisposeAsync();
 }

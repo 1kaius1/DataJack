@@ -98,6 +98,11 @@ public readonly record struct BatchReceived(
 // Registration events
 // ---------------------------------------------------------------------------
 
+/// <summary>ISUPPORT tokens (005) received from the server during registration.</summary>
+public readonly record struct IsupportTokensReceived(
+    string Server,
+    IReadOnlyDictionary<string, string> Tokens);
+
 /// <summary>The server accepted registration and assigned a nick (numeric 001).</summary>
 public readonly record struct WelcomeReceived(string Server, string Nick);
 
@@ -161,7 +166,7 @@ public readonly record struct TopicChanged(
     string Server,
     string Channel,
     string NewTopic,
-    string SetterNick);
+    string? SetterNick);
 
 /// <summary>An INVITE arrived for the local user.</summary>
 public readonly record struct InviteReceived(string Server, string Channel, string FromNick);
@@ -183,6 +188,28 @@ public readonly record struct ChannelModeChanged(
 
 /// <summary>The channel creation time was received (numeric 329).</summary>
 public readonly record struct ChannelCreated(string Server, string Channel, DateTimeOffset CreatedAt);
+
+/// <summary>One entry from an RPL_LIST (322) response.</summary>
+public readonly record struct ChannelListEntry(
+    string Server,
+    string Channel,
+    int UserCount,
+    string Topic);
+
+/// <summary>The server finished sending its channel list (RPL_LISTEND, 323).</summary>
+public readonly record struct ChannelListEnd(string Server);
+
+/// <summary>One nick entry from a NAMES reply, carrying the nick and its mode prefix chars.</summary>
+public sealed record NamesEntry(string Nick, IReadOnlyList<char> Prefixes);
+
+/// <summary>
+/// A complete NAMES list for a channel, assembled from RPL_NAMREPLY (353) lines
+/// and emitted when RPL_ENDOFNAMES (366) is received.
+/// </summary>
+public readonly record struct NamesListReceived(
+    string Server,
+    string Channel,
+    IReadOnlyList<NamesEntry> Users);
 
 // ---------------------------------------------------------------------------
 // User events
@@ -212,6 +239,9 @@ public readonly record struct UserRealNameChanged(string Server, string Nick, st
 /// <summary>A MONITOR online/offline reply was received (730/731 numerics).</summary>
 public readonly record struct MonitorStatusChanged(string Server, string Nick, bool IsOnline);
 
+/// <summary>A user-level MODE change was applied to a nick (not a channel).</summary>
+public readonly record struct UserModeChanged(string Server, string Nick, string ModeString);
+
 /// <summary>One entry from a WHO reply (numeric 352).</summary>
 public readonly record struct WhoReplyEntry(
     string Server,
@@ -235,6 +265,9 @@ public readonly record struct WhoIsReply(
 
 /// <summary>The WHOIS reply sequence is complete (numeric 318).</summary>
 public readonly record struct WhoIsEnd(string Server, string Nick);
+
+/// <summary>The WHO reply sequence for a target is complete (RPL_ENDOFWHO, 315).</summary>
+public readonly record struct WhoEnd(string Server, string Target);
 
 /// <summary>One entry from a ban list (numeric 367).</summary>
 public readonly record struct BanListEntry(

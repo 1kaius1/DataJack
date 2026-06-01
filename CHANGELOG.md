@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCParser phase-3 numerics and IRCv3 protocol commands
+  (core/irc/Parser.cs): switched from Task.Run to a single sequential
+  channel drain loop (same pattern as CapabilityNegotiator) so multi-line
+  reply sequences (WHOIS, NAMES) are processed in TCP arrival order.
+  Added handlers for: 005 ISUPPORT token parsing, 311/312/317/318/330
+  WHOIS assembly (buffers partial replies, flushes on 318), 315 WHO end,
+  352 WHO reply, 322/323 LIST, 329 channel creation time, 332/333
+  TOPIC reply + TOPICWHOTIME, 353/366 NAMES accumulation and flush,
+  367/368 ban list, 730/731 MONITOR online/offline, MODE (channel and
+  user), AWAY (away-notify), CHGHOST, ACCOUNT, SETNAME.
+  TopicChanged.SetterNick changed to string? (null when setter is
+  unknown, e.g. 332 reply).
+- New event types (core/events/Types.cs): IsupportTokensReceived,
+  ChannelListEntry, ChannelListEnd, NamesEntry, NamesListReceived,
+  UserModeChanged, WhoEnd.
+- 21 new parser tests (tests/DataJack.Core.Tests/IrcParserTests.cs)
+  covering all new numeric and command handlers.
+
+
 - Configuration system (storage/config): AppConfig versioned schema (schema_version=1)
   with IdentitySettings, ServerEntry, SaslCredentials, AppearanceSettings, LoggingSettings,
   AdvancedSettings records. ConfigLoader reads/writes settings.json with atomic rename-on-save
