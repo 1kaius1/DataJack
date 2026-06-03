@@ -101,7 +101,12 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 - [x] `server-time` tag used for all displayed timestamps (ServerTimeHandler.GetTimestamp)
 - [x] `monitor` capability for nick online/offline tracking; `MonitorStatusChanged` events
   (730/731 in parser; MonitorHandler manages watchlist and reconnect resubscription)
-- [ ] Full `IRCStateModel`: topic + who/time, away status, account names, ISUPPORT tokens
+- [x] Full `IRCStateModel`: `IRCStateUpdater` subscribes to all protocol events for one server
+  and drives `IRCStateModel.Apply` to maintain the snapshot tree: connection lifecycle,
+  ISUPPORT token accumulation, IRCv3 active-cap set, channel membership (join/part/kick/quit/
+  nick rename), topic + creation time, channel and prefix modes, NAMES user list with
+  prefix-to-mode mapping, WHO/WHOIS user-info backfill, CHGHOST, away status, account,
+  realname (SETNAME), and MONITOR online/offline status.
 - [ ] Full built-in command set (ARCHITECTURE.md §13): `/kick`, `/ban`, `/mode`, `/op`, `/voice`, `/whois`, `/who`, `/ignore`, `/list`, `/names`, `/timer`, `/help`, etc.
 - [ ] Alias system: `/alias` command; `%1`/`%*` substitution; stored in config
 - [ ] `ServerListDialog`: complete — all fields (SASL credentials, auto-join, connect commands); import/export JSON

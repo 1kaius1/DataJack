@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IRCStateUpdater (core/state/IRCStateUpdater.cs): one instance per server;
+  subscribes to all IRC protocol events on the event dispatch thread and drives
+  IRCStateModel.Apply to keep the snapshot tree current. Handles: connection
+  lifecycle (ConnectionAttempted creates server entry, ConnectionEstablished /
+  ConnectionClosed set IsConnected, WelcomeReceived sets RegisteredNick and
+  ConnectionClosed clears channels/caps and marks monitored nicks offline);
+  ISUPPORT token accumulation (merges across multiple 005 lines); IRCv3
+  active-cap set (CapabilityNegotiated replaces, ServerCapabilityChanged
+  adds/removes); nick changes (NickChanged renames local nick and updates all
+  channel user dictionary entries); channel membership (JoinedChannel/
+  PartedChannel/KickReceived for self or others, UserQuit across all channels);
+  topic (TopicChanged sets text + preserves existing setter/time, TopicWhoTime
+  updates setter and timestamp while preserving text, ChannelCreated stores
+  creation time); channel and prefix modes (OnChannelModeChanged parses MODE
+  strings using PREFIX and CHANMODES ISUPPORT tokens, applies prefix modes to
+  ChannelUser.ChannelModes and channel flags/params to ChannelState.Modes,
+  skips type-A list modes, falls back to IRC defaults when ISUPPORT is absent);
+  NAMES list (NamesListReceived replaces the Users dictionary, maps prefix
+  symbols to mode chars via PREFIX ISUPPORT, carries forward existing
+  user/host/account/realname); WHO and WHOIS backfill (WhoReplyEntry /
+  WhoIsReply update user/host/account/realname in all channels the nick
+  appears in); user metadata (UserHostChanged / UserAwayChanged /
+  UserAccountChanged / UserRealNameChanged each update the matching field in
+  all channel entries for that nick); MONITOR (MonitorStatusChanged adds or
+  updates MonitoredNick entries).
+- 40 new state updater tests (tests/DataJack.Core.Tests/IRCStateUpdaterTests.cs)
+  covering: connection lifecycle (5), ISUPPORT merge (2), capabilities (3),
+  nick changes (3), channel membership (7), topic (3), NAMES prefix mapping (1),
+  channel modes (3), WHO/WHOIS backfill (2), user metadata (5),
+  MONITOR (2), cross-server isolation (1), snapshot isolation (1) -- 32 total,
+  plus 8 additional edge-case assertions.
+
 - IRCv3 capability handlers (core/caps/handlers/): one file per capability.
   CapabilityRegistry tracks active capabilities (from CapabilityNegotiated /
   ServerCapabilityChanged) and the local nick (from WelcomeReceived /
