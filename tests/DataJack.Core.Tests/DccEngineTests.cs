@@ -513,13 +513,13 @@ public sealed class DccEngineTests : IAsyncDisposable
             new FakeNetworkProvider(senderStream),
             () => new DccSettings(tempDir, false, 0));
 
-        DccOfferReceived? offer = null;
-        _dispatcher.Subscribe<DccOfferReceived>(e => offer = e);
-
-        await Pub(new CtcpRequest(Server, "peer", "DCC",
+        // Use a TCS for the offer so we wait for actual dispatch rather than a fixed delay.
+        var offerTcs = new TaskCompletionSource<DccOfferReceived>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.Subscribe<DccOfferReceived>(e => offerTcs.TrySetResult(e));
+        await _dispatcher.PublishAsync(new CtcpRequest(Server, "peer", "DCC",
             $"SEND hello.txt 2130706433 5000 {fileContent.Length}"));
-
-        Assert.NotNull(offer);
+        var offer = await offerTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // The DccCompleted event is dispatched on the event-loop thread after
         // AcceptReceiveAsync writes it to the channel. Use a TCS so the test
@@ -528,9 +528,9 @@ public sealed class DccEngineTests : IAsyncDisposable
             TaskCreationOptions.RunContinuationsAsynchronously);
         _dispatcher.Subscribe<DccCompleted>(e => completedTcs.TrySetResult(e));
 
-        await _engine.AcceptReceiveAsync(offer!.Value.SessionId);
+        await _engine.AcceptReceiveAsync(offer.SessionId);
 
-        DccCompleted completed = await completedTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        DccCompleted completed = await completedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(fileContent.Length, (int)completed.BytesTransferred);
 
         string savedPath = Path.Combine(tempDir, "hello.txt");
@@ -1054,27 +1054,35 @@ public sealed class DccEngineResumeTests : IAsyncDisposable
             () => new DccSettings(tempDir, false, 0),
             ircConnection: ircConn);
 
-        // Simulate receiving the original SEND offer.
-        DccOfferReceived? offer = null;
-        _dispatcher.Subscribe<DccOfferReceived>(e => offer = e);
-        await Pub(new CtcpRequest(Server, "sender", "DCC",
+        // Use a TCS for the offer so we wait for actual dispatch rather than a fixed delay.
+        var offerTcs = new TaskCompletionSource<DccOfferReceived>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.Subscribe<DccOfferReceived>(e => offerTcs.TrySetResult(e));
+        await _dispatcher.PublishAsync(new CtcpRequest(Server, "sender", "DCC",
             $"SEND resume.txt 2130706433 5000 {fullContent.Length}"));
-
-        Assert.NotNull(offer);
+        var offer = await offerTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Start the accept in the background (it will pause at the RESUME handshake).
-        var acceptTask = _engine.AcceptReceiveAsync(offer!.Value.SessionId);
+        var acceptTask = _engine.AcceptReceiveAsync(offer.SessionId);
 
-        // Give AcceptReceiveAsync time to send the DCC RESUME CTCP.
-        await Task.Delay(150);
+        // Wait for AcceptReceiveAsync to actually send the DCC RESUME CTCP line rather
+        // than using a fixed delay (which races under parallel test load).
+        var resumeSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<RawLineSent> onSent = e =>
+        {
+            if (e.Line.Contains("RESUME", StringComparison.OrdinalIgnoreCase))
+                resumeSent.TrySetResult();
+        };
+        _dispatcher.Subscribe(onSent);
+        await resumeSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _dispatcher.Unsubscribe(onSent);
 
         // Sender replies with DCC ACCEPT to release the handshake.
         // (The RESUME CTCP wire format is verified in DccCtcpParserResumeTests.)
         await _dispatcher.PublishAsync(
             new CtcpRequest(Server, "sender", "DCC", $"ACCEPT resume.txt 5000 {offset}"));
-        await Task.Delay(50);
 
-        // AcceptReceiveAsync should now complete.
+        // AcceptReceiveAsync awaits the ACCEPT signal; await acceptTask is sufficient.
         await acceptTask;
 
         // Verify the file contains the full content.

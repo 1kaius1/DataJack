@@ -10,17 +10,10 @@ public sealed class IdleMonitorTests
     // Helpers
     // ---------------------------------------------------------------------------
 
-    // Delay factory that completes immediately (unless ct is cancelled).
-    // Makes IdleTripped fire synchronously in tests.
-    private static Func<int, CancellationToken, Task> InstantDelay() =>
-        (_, ct) =>
-        {
-            ct.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        };
-
     // Delay factory that blocks until the returned TaskCompletionSource is resolved.
-    // Lets tests control exactly when the delay completes (or cancel it).
+    // Lets tests subscribe to events before the countdown can fire, eliminating the
+    // race where Task.CompletedTask would let the countdown fire before subscriptions
+    // are registered.
     private static (Func<int, CancellationToken, Task> factory, TaskCompletionSource gate)
         BlockingDelay()
     {
@@ -30,6 +23,21 @@ public sealed class IdleMonitorTests
             using var reg = ct.Register(() => gate.TrySetCanceled());
             await gate.Task.ConfigureAwait(false);
         }, gate);
+    }
+
+    // Delay factory with two independent gates: gate[0] controls the first countdown,
+    // gate[1] controls the second. Subsequent calls reuse gate[1] to stay in-bounds.
+    private static (Func<int, CancellationToken, Task> factory, TaskCompletionSource[] gates)
+        TwoGateDelay()
+    {
+        var gates = new[] { new TaskCompletionSource(), new TaskCompletionSource() };
+        int callIndex = -1;
+        return (async (_, ct) =>
+        {
+            int i = Math.Min(Interlocked.Increment(ref callIndex), gates.Length - 1);
+            using var reg = ct.Register(() => gates[i].TrySetCanceled());
+            await gates[i].Task.ConfigureAwait(false);
+        }, gates);
     }
 
     // ---------------------------------------------------------------------------
@@ -59,25 +67,33 @@ public sealed class IdleMonitorTests
     [Fact]
     public async Task IdleTripped_FiredWhenDelayElapses()
     {
+        // BlockingDelay lets us subscribe before the countdown can fire, eliminating
+        // the race where a free thread-pool thread fires IdleTripped before the += line.
+        var (factory, gate) = BlockingDelay();
         var fired = new TaskCompletionSource();
-        using var monitor = new IdleMonitor(1, InstantDelay());
+
+        using var monitor = new IdleMonitor(1, factory);
         monitor.IdleTripped += () => fired.TrySetResult();
 
+        gate.TrySetResult();
         await fired.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
     public async Task IdleTripped_FiredExactlyOnce_PerIdleCycle()
     {
+        var (factory, gate) = BlockingDelay();
         int count = 0;
         var fired = new TaskCompletionSource();
-        using var monitor = new IdleMonitor(1, InstantDelay());
+
+        using var monitor = new IdleMonitor(1, factory);
         monitor.IdleTripped += () =>
         {
             Interlocked.Increment(ref count);
             fired.TrySetResult();
         };
 
+        gate.TrySetResult();
         await fired.Task.WaitAsync(TimeSpan.FromSeconds(5));
         // Wait a little longer to catch spurious double-fires.
         await Task.Delay(50);
@@ -111,14 +127,16 @@ public sealed class IdleMonitorTests
     [Fact]
     public async Task ActivityResumed_FiredWhenUserTypesAfterIdle()
     {
+        var (factory, gate) = BlockingDelay();
         var idleGate    = new TaskCompletionSource();
         var resumedGate = new TaskCompletionSource();
 
-        using var monitor = new IdleMonitor(1, InstantDelay());
+        using var monitor = new IdleMonitor(1, factory);
         monitor.IdleTripped     += () => idleGate.TrySetResult();
         monitor.ActivityResumed += () => resumedGate.TrySetResult();
 
-        // Wait for idle to trip.
+        // Release the countdown; wait for idle to trip.
+        gate.TrySetResult();
         await idleGate.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Simulate user typing.
@@ -147,13 +165,15 @@ public sealed class IdleMonitorTests
     [Fact]
     public async Task ActivityResumed_FiredExactlyOnce_OnFirstKeystrokeAfterIdle()
     {
+        var (factory, gate) = BlockingDelay();
         var idleGate = new TaskCompletionSource();
         int resumeCount = 0;
 
-        using var monitor = new IdleMonitor(1, InstantDelay());
+        using var monitor = new IdleMonitor(1, factory);
         monitor.IdleTripped     += () => idleGate.TrySetResult();
         monitor.ActivityResumed += () => Interlocked.Increment(ref resumeCount);
 
+        gate.TrySetResult();
         await idleGate.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Two rapid keystrokes.
@@ -172,6 +192,10 @@ public sealed class IdleMonitorTests
     [Fact]
     public async Task IdleAndResume_TwoCycles_BothFire()
     {
+        // TwoGateDelay gives explicit control over when each countdown fires:
+        // release gates[0] for cycle 1, gates[1] for cycle 2. This eliminates
+        // the race where InstantDelay (Task.CompletedTask) fires before subscriptions.
+        var (factory, gates) = TwoGateDelay();
         int idleCount   = 0;
         int resumeCount = 0;
 
@@ -179,9 +203,7 @@ public sealed class IdleMonitorTests
         var cycle1Resume = new TaskCompletionSource();
         var cycle2Idle   = new TaskCompletionSource();
 
-        // For cycle 2, NotifyActivity needs to restart the countdown.
-        // We use InstantDelay for both countdown runs.
-        using var monitor = new IdleMonitor(1, InstantDelay());
+        using var monitor = new IdleMonitor(1, factory);
         monitor.IdleTripped += () =>
         {
             if (Interlocked.Increment(ref idleCount) == 1) cycle1Idle.TrySetResult();
@@ -193,12 +215,15 @@ public sealed class IdleMonitorTests
             cycle1Resume.TrySetResult();
         };
 
-        // Cycle 1: wait for idle, then come back.
+        // Cycle 1: release gate 0 → idle fires.
+        gates[0].TrySetResult();
         await cycle1Idle.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        monitor.NotifyActivity(); // fires ActivityResumed, restarts countdown
+
+        monitor.NotifyActivity(); // fires ActivityResumed, starts cycle 2 countdown
         await cycle1Resume.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Cycle 2: the new countdown fires a second IdleTripped.
+        // Cycle 2: release gate 1 → second idle fires.
+        gates[1].TrySetResult();
         await cycle2Idle.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(2, idleCount);

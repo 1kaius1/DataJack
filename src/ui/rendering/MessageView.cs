@@ -78,8 +78,13 @@ public sealed class MessageView : Border
 
     private void OnMessageAdded(MessageEntry msg)
     {
-        _panel.Children.Add(BuildRow(msg));
-        ScrollToBottom();
+        // MessageAdded fires on the IRC dispatch thread; marshal to UI thread before
+        // touching Avalonia controls (controls must be created and mutated on their owner thread).
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _panel.Children.Add(BuildRow(msg));
+            ScrollToBottom();
+        });
     }
 
     private Control BuildRow(MessageEntry msg)
