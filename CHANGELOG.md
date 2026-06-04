@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- LogFtsIndex (storage/logs/Indexer.cs): SQLite FTS5 search index over IRC log entries.
+  Single standalone virtual table log_messages: from_nick and text are FTS-indexed with
+  the unicode61 tokenizer; server, target, ts, kind are UNINDEXED (stored for retrieval
+  and metadata filtering). InitializeAsync creates the table idempotently. IndexAsync
+  inserts a LogEntry and returns it with the assigned SQLite rowid as Id. SearchAsync
+  accepts a SearchQuery (Text, Nick, Server, After, Before), a zero-based page index,
+  and a page size (default 50); returns a SearchResultPage. When SearchQuery.Text is
+  non-empty it is passed to "log_messages MATCH @ftsQuery" using FTS5 query syntax
+  (quotes for phrases, hyphen for NOT, column:term for column-scoped search); results are
+  ordered by FTS5 rank then ts DESC. When Text is empty, only metadata filters are applied
+  (full table scan) and results are ordered by ts DESC. Invalid FTS5 queries are caught
+  (SqliteException) and return an empty page rather than surfacing the error. Nick filter
+  uses COLLATE NOCASE exact match. After/Before filters compare Unix-second timestamps
+  stored as INTEGER. Uses two separate SqliteCommand objects (INSERT then SELECT
+  last_insert_rowid()) to avoid multi-statement limitations in Microsoft.Data.Sqlite.
+
+- LogEntry (storage/logs/LogEntry.cs): sealed record (Id, Server, Target, FromNick, Text,
+  Timestamp, Kind). LogEntryKind enum: Message, Action, Notice, ServerMessage. Id is 0
+  for unsaved entries and is the SQLite rowid after indexing.
+
+- SearchQuery (storage/logs/SearchQuery.cs): sealed record (Text, Nick?, Server?,
+  After?, Before?). SearchResultPage: sealed record (Entries, TotalCount, Page, PageSize)
+  with computed HasMore = (Page + 1) * PageSize < TotalCount.
+
+- 27 new tests (tests/DataJack.Core.Tests/LogFtsIndexTests.cs): empty database; single
+  entry found by text; FTS case-insensitive; no-match; FTS phrase query; invalid FTS5
+  query returns empty; empty/whitespace text returns all; nick filter match/case-insensitive/
+  exclude; server filter match/exclude; after/before date filters; combined date range;
+  text+nick combined; text+server combined; TotalCount; timestamp-descending ordering;
+  pagination (page 0, page 1, HasMore true, HasMore false); action entry indexed; assigned
+  Id; full field round-trip.
+
 - HighlightMatcher (core/irc/HighlightMatcher.cs): stateless, thread-safe static class for
   evaluating highlight patterns against IRC message text. IsHighlight(text, currentNick,
   patterns) checks the current nick as a whole word first (ContainsNickAsWord: OrdinalIgnoreCase,

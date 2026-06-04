@@ -156,7 +156,20 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   optional `Func<IReadOnlyList<HighlightPattern>>` patternsGetter and delegate the channel
   highlight check to `HighlightMatcher.IsHighlight` (existing nick-only behavior preserved
   when getter is null).
-- [ ] Log search: SQLite FTS5 index; `nick:`, `server:`, date range filters; paginated results
+- [x] Log search: `LogFtsIndex` (storage/logs/Indexer.cs) backed by a standalone SQLite FTS5
+  virtual table `log_messages`. `from_nick` and `text` are FTS-indexed (unicode61 tokenizer);
+  `server`, `target`, `ts`, `kind` are UNINDEXED (stored, not tokenized). `InitializeAsync`
+  creates the table if absent. `IndexAsync(LogEntry)` inserts and returns the entry with
+  the assigned rowid as `Id`. `SearchAsync(SearchQuery, page, pageSize)` returns a
+  `SearchResultPage` with `Entries`, `TotalCount`, `Page`, `PageSize`, and `HasMore`.
+  When `SearchQuery.Text` is non-empty it is passed directly to `log_messages MATCH`
+  (FTS5 query syntax: phrases, exclusions, etc.) and results are ordered by FTS5 rank then
+  timestamp DESC; invalid FTS5 queries return empty rather than throwing. When `Text` is
+  empty only metadata filters are applied (full table scan). Metadata filters: `Nick`
+  (case-insensitive exact match), `Server` (exact match), `After`/`Before` (Unix timestamp
+  range). `LogEntry` (storage/logs/LogEntry.cs): Id, Server, Target, FromNick, Text,
+  Timestamp, Kind (`LogEntryKind`: Message/Action/Notice/ServerMessage). `SearchQuery`
+  and `SearchResultPage` (storage/logs/SearchQuery.cs).
 - [ ] Log archive: compression (gzip/zstd); configurable rotation age; `ExportManager` (plain text and HTML)
 - [ ] SOCKS5 proxy transport; per-server proxy config; remote DNS resolution (no DNS leaks)
 - [ ] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes); executable file type warnings; configurable download directory
