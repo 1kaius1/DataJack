@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- LogArchiver (storage/logs/Archive.cs): static class with ArchiveOldLogsAsync(logDirectory,
+  maxAgeDays=90) that recursively enumerates *.log files and compresses those whose last-write
+  time predates the cutoff to <name>.log.gz via GZipStream (CompressionLevel.Optimal), then
+  deletes the original. *.log.gz files are excluded by the glob pattern and never recompressed.
+  Non-existent directories return immediately. CompressToAsync uses three chained await using
+  var declarations whose reverse-order disposal ensures the GZip footer is written before the
+  output FileStream is closed. zstd planned for a future phase.
+
+- ExportManager (storage/logs/Export.cs): static class with ExportAsync(entries, stream,
+  format, ct) and ExportToStringAsync convenience wrapper. ExportFormat enum: PlainText, Html.
+  PlainText: one line per LogEntry, format varies by LogEntryKind — Message: "[ts] <nick> text",
+  Action: "[ts] * nick text", Notice: "[ts] -nick- text", ServerMessage: "[ts] *** text".
+  Timestamps are UTC, formatted as "yyyy-MM-dd HH:mm:ss". Html: self-contained document with
+  embedded dark-theme CSS (1e1e1e background), per-kind colour classes (message/action/notice/
+  server), line-level div elements with ts/nick/text spans. System.Net.WebUtility.HtmlEncode
+  applied to from_nick and text fields prevents XSS in exported HTML. StreamWriter uses
+  new UTF8Encoding(false) (no BOM marker) so an empty-input export returns an empty string.
+
+- ArchiveSettings (storage/config/Schema.cs): sealed record (Enabled bool, MaxAgeDays int);
+  default Enabled=true, MaxAgeDays=90. Added as AppConfig.Archive; CurrentVersion bumped 3→4;
+  MigrateToV4 adds {"enabled": true, "max_age_days": 90} to configs that lack the "archive"
+  key. Loader_MigratesV2ToV3 test updated to use AppConfig.CurrentVersion (version-agnostic
+  assertion); Default_Config_SchemaVersionIsThree test removed and replaced with
+  Default_Config_SchemaVersionIsFour.
+
+- 27 new tests: LogArchiverTests (9): non-existent directory returns without error, empty
+  directory is no-op, old file is compressed, old file original deleted, recent file not
+  touched, existing gz skipped, CompressFileAsync creates gz, deletes original, content
+  preserved after decompress. ExportManagerTests (15): plain text empty, message format,
+  action asterisk, notice dashes, server-message triple-asterisk, UTC timestamp, multiple
+  lines; HTML empty returns complete document, contains style block, message nick and text,
+  timestamp, action class, notice class, special chars HTML-encoded, multiple entries;
+  ExportToString matches stream for both formats. ConfigTests (3 net new): schema version 4,
+  default archive settings, v3-to-v4 migration.
+
 - LogFtsIndex (storage/logs/Indexer.cs): SQLite FTS5 search index over IRC log entries.
   Single standalone virtual table log_messages: from_nick and text are FTS-indexed with
   the unicode61 tokenizer; server, target, ts, kind are UNINDEXED (stored for retrieval

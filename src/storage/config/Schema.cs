@@ -15,10 +15,11 @@ public sealed record AppConfig(
     [property: JsonPropertyName("logging")]            LoggingSettings            Logging,
     [property: JsonPropertyName("advanced")]           AdvancedSettings           Advanced,
     [property: JsonPropertyName("aliases")]            Dictionary<string, string> Aliases,
-    [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns)
+    [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns,
+    [property: JsonPropertyName("archive")]            ArchiveSettings            Archive)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -29,7 +30,8 @@ public sealed record AppConfig(
         Logging:           LoggingSettings.Default(),
         Advanced:          AdvancedSettings.Default(),
         Aliases:           new Dictionary<string, string>(),
-        HighlightPatterns: new List<HighlightPattern>());
+        HighlightPatterns: new List<HighlightPattern>(),
+        Archive:           ArchiveSettings.Default());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>
@@ -137,6 +139,15 @@ public sealed record HighlightPattern(
     [property: JsonPropertyName("expression")]     string              Expression,
     [property: JsonPropertyName("kind")]           HighlightPatternKind Kind,
     [property: JsonPropertyName("case_sensitive")] bool                CaseSensitive = false);
+
+/// <summary>Settings for automatic log file rotation and gzip compression.</summary>
+public sealed record ArchiveSettings(
+    [property: JsonPropertyName("enabled")]      bool Enabled,
+    [property: JsonPropertyName("max_age_days")] int  MaxAgeDays)
+{
+    /// <summary>Default: enabled, archive files older than 90 days.</summary>
+    internal static ArchiveSettings Default() => new(Enabled: true, MaxAgeDays: 90);
+}
 
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>
 public sealed record AdvancedSettings(

@@ -170,7 +170,23 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   range). `LogEntry` (storage/logs/LogEntry.cs): Id, Server, Target, FromNick, Text,
   Timestamp, Kind (`LogEntryKind`: Message/Action/Notice/ServerMessage). `SearchQuery`
   and `SearchResultPage` (storage/logs/SearchQuery.cs).
-- [ ] Log archive: compression (gzip/zstd); configurable rotation age; `ExportManager` (plain text and HTML)
+- [x] Log archive: `LogArchiver` (storage/logs/Archive.cs) — `ArchiveOldLogsAsync(dir, maxAgeDays)`
+  enumerates `*.log` files recursively and gzip-compresses those whose last-write time exceeds
+  `maxAgeDays` days, producing `<name>.log.gz` and deleting the original. Compression via
+  `System.IO.Compression.GZipStream` (optimal level); disposal order of nested `await using`
+  guarantees the gzip footer is flushed before the output FileStream closes. Already-compressed
+  `.log.gz` files and non-existent directories are silently skipped. zstd planned for a future
+  phase when a pure-.NET implementation is available.
+  `ExportManager` (storage/logs/Export.cs) — `ExportAsync(entries, stream, format)` and
+  `ExportToStringAsync` convenience overload. Two formats: `ExportFormat.PlainText` (one line per
+  entry: `[yyyy-MM-dd HH:mm:ss] <nick> text` / `* nick text` / `-nick- text` / `*** text`; UTC
+  timestamps) and `ExportFormat.Html` (self-contained document with embedded CSS, dark theme,
+  per-kind colour classes; `WebUtility.HtmlEncode` applied to nick and text to prevent XSS).
+  `StreamWriter` uses `new UTF8Encoding(false)` (no BOM) so the empty-export case returns an
+  empty string.
+  `ArchiveSettings` (storage/config/Schema.cs): `Enabled` (bool, default true) and `MaxAgeDays`
+  (int, default 90); added to `AppConfig`; schema bumped to v4; migration v4 adds default
+  archive object to existing configs.
 - [ ] SOCKS5 proxy transport; per-server proxy config; remote DNS resolution (no DNS leaks)
 - [ ] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes); executable file type warnings; configurable download directory
 - [ ] DCC RESUME: transfer restart at byte offset

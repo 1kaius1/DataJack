@@ -104,6 +104,8 @@ public sealed class ConfigLoader
         2 => MigrateToV2(node),
         // v3 adds the "highlight_patterns" array for user-configured highlight patterns.
         3 => MigrateToV3(node),
+        // v4 adds the "archive" object for log rotation and gzip compression settings.
+        4 => MigrateToV4(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -122,6 +124,21 @@ public sealed class ConfigLoader
             obj["highlight_patterns"] = new System.Text.Json.Nodes.JsonArray();
 
         node["schema_version"] = 3;
+        return node;
+    }
+
+    private static JsonNode MigrateToV4(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj && obj["archive"] is null)
+        {
+            obj["archive"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["enabled"]      = true,
+                ["max_age_days"] = 90,
+            };
+        }
+
+        node["schema_version"] = 4;
         return node;
     }
 }

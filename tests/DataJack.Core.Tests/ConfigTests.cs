@@ -228,10 +228,60 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsThree()
+    public void Default_Config_SchemaVersionIsFour()
     {
-        Assert.Equal(3, AppConfig.CurrentVersion);
-        Assert.Equal(3, AppConfig.Default().SchemaVersion);
+        Assert.Equal(4, AppConfig.CurrentVersion);
+        Assert.Equal(4, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public void Default_Archive_IsEnabledWithMaxAge90()
+    {
+        var config = AppConfig.Default();
+        Assert.NotNull(config.Archive);
+        Assert.True(config.Archive.Enabled);
+        Assert.Equal(90, config.Archive.MaxAgeDays);
+    }
+
+    [Fact]
+    public async Task Loader_MigratesV3ToV4_AddsArchiveSettings()
+    {
+        string path = Path.Combine(_tempDir, "settings_v3.json");
+
+        string v3Json = """
+            {
+              "schema_version": 3,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0
+              },
+              "aliases": {},
+              "highlight_patterns": []
+            }
+            """;
+        await File.WriteAllTextAsync(path, v3Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(4, loader.Config.SchemaVersion);
+        Assert.NotNull(loader.Config.Archive);
+        Assert.True(loader.Config.Archive.Enabled);
+        Assert.Equal(90, loader.Config.Archive.MaxAgeDays);
     }
 
     [Fact]
@@ -297,9 +347,10 @@ public sealed class ConfigTests : IAsyncDisposable
         var loader = new ConfigLoader(path);
         await loader.LoadAsync();
 
-        Assert.Equal(3, loader.Config.SchemaVersion);
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
         Assert.NotNull(loader.Config.HighlightPatterns);
         Assert.Empty(loader.Config.HighlightPatterns);
+        Assert.NotNull(loader.Config.Archive);
     }
 
     [Fact]
