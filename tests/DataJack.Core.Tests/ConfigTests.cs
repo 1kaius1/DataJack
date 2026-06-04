@@ -739,4 +739,33 @@ public sealed class ConfigTests : IAsyncDisposable
 
         Assert.Equal("/tmp/datajack-debug.log", loader2.Config.Advanced.DebugLogPath);
     }
+
+    [Fact]
+    public async Task Loader_InitialFile_ContainsDebugLogComment()
+    {
+        string path = Path.Combine(_tempDir, "settings_comment.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        string content = await File.ReadAllTextAsync(path);
+        Assert.Contains("// \"log_debug\":", content);
+        Assert.Contains("/tmp/datajack-debug.log", content);
+        // The actual key must also be present so the file is valid JSON-with-comments.
+        Assert.Contains("\"log_debug\": null", content);
+    }
+
+    [Fact]
+    public async Task Loader_InitialFileWithComment_CanBeReloaded()
+    {
+        string path = Path.Combine(_tempDir, "settings_comment_reload.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        // Load a second time from the file that was just written (which contains comment lines).
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.Equal(AppConfig.CurrentVersion, loader2.Config.SchemaVersion);
+        Assert.Null(loader2.Config.Advanced.DebugLogPath);
+    }
 }

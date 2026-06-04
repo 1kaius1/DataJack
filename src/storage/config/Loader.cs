@@ -46,12 +46,14 @@ public sealed class ConfigLoader
         if (!File.Exists(_configPath))
         {
             Config = AppConfig.Default();
-            await SaveAsync(ct).ConfigureAwait(false);
+            await WriteInitialConfigAsync(ct).ConfigureAwait(false);
             return;
         }
 
         await using var stream = File.OpenRead(_configPath);
-        var node = await JsonNode.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false)
+        var node = await JsonNode.ParseAsync(stream,
+                documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip },
+                cancellationToken: ct).ConfigureAwait(false)
             ?? throw new InvalidDataException("Configuration file is not valid JSON.");
 
         int onDiskVersion = node["schema_version"]?.GetValue<int>() ?? 0;
@@ -206,5 +208,47 @@ public sealed class ConfigLoader
 
         node["schema_version"] = 8;
         return node;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Initial file write
+    // Writes the default config with a commented-out example for optional fields,
+    // so users editing the file by hand can see what each optional key looks like.
+    // ---------------------------------------------------------------------------
+
+    private async Task WriteInitialConfigAsync(CancellationToken ct)
+    {
+        string? dir = Path.GetDirectoryName(_configPath);
+        if (dir is not null)
+            Directory.CreateDirectory(dir);
+
+        string json = JsonSerializer.Serialize(Config, s_jsonOptions);
+        json = InsertDebugLogComment(json);
+
+        string tmp = _configPath + ".tmp";
+        await File.WriteAllTextAsync(tmp, json, System.Text.Encoding.UTF8, ct)
+            .ConfigureAwait(false);
+        File.Move(tmp, _configPath, overwrite: true);
+    }
+
+    // Inserts two comment lines before the "log_debug" entry to show users the example
+    // path format. The key itself remains as null so the JSON stays valid without
+    // requiring AllowTrailingCommas.
+    private static string InsertDebugLogComment(string json)
+    {
+        var lines  = new List<string>(json.Split('\n'));
+        int target = lines.FindIndex(l => l.Contains("\"log_debug\":"));
+        if (target < 0) return json;
+
+        int    spaces = lines[target].Length - lines[target].TrimStart().Length;
+        string indent = new string(' ', spaces);
+
+        lines.InsertRange(target, new[]
+        {
+            $"{indent}// To enable raw-I/O debug logging, replace null with an absolute path.",
+            $"{indent}// \"log_debug\": \"/tmp/datajack-debug.log\"",
+        });
+
+        return string.Join('\n', lines);
     }
 }
