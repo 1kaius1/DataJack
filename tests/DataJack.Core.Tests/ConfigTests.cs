@@ -181,4 +181,82 @@ public sealed class ConfigTests : IAsyncDisposable
         var scope = new SettingsScope(AppConfig.Default(), "Libera");
         Assert.Equal("UTF-8", scope.Encoding);
     }
+
+    // ---------------------------------------------------------------------------
+    // Aliases (schema v2)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public void Default_Aliases_IsEmpty()
+    {
+        var config = AppConfig.Default();
+        Assert.NotNull(config.Aliases);
+        Assert.Empty(config.Aliases);
+    }
+
+    [Fact]
+    public void Default_Config_SchemaVersionIsTwo()
+    {
+        Assert.Equal(2, AppConfig.CurrentVersion);
+        Assert.Equal(2, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesAliases()
+    {
+        string path = Path.Combine(_tempDir, "settings_aliases.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Aliases = new Dictionary<string, string> { ["weather"] = "/msg #weather %1" },
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.True(loader2.Config.Aliases.ContainsKey("weather"));
+        Assert.Equal("/msg #weather %1", loader2.Config.Aliases["weather"]);
+    }
+
+    [Fact]
+    public async Task Loader_MigratesV1ToV2_AddsEmptyAliases()
+    {
+        string path = Path.Combine(_tempDir, "settings_v1.json");
+
+        // Write a minimal v1 config by hand (no "aliases" key).
+        string v1Json = """
+            {
+              "schema_version": 1,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0
+              }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v1Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(2, loader.Config.SchemaVersion);
+        Assert.NotNull(loader.Config.Aliases);
+        Assert.Empty(loader.Config.Aliases);
+    }
 }

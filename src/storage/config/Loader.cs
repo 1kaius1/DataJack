@@ -100,6 +100,17 @@ public sealed class ConfigLoader
         // v1 is the initial schema; a v0 file is treated as corrupted / non-existent.
         // Replace it entirely with defaults rather than attempting to salvage it.
         1 => JsonSerializer.SerializeToNode(AppConfig.Default(), s_jsonOptions)!,
+        // v2 adds the "aliases" object for user-defined command aliases (AliasManager).
+        2 => MigrateToV2(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
+
+    private static JsonNode MigrateToV2(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj && obj["aliases"] is null)
+            obj["aliases"] = new System.Text.Json.Nodes.JsonObject();
+
+        node["schema_version"] = 2;
+        return node;
+    }
 }

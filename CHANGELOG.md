@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Alias system (core/irc/AliasManager.cs): AliasManager stores user-defined command
+  aliases and expands them at dispatch time. Set(name, expansion) adds or replaces an
+  alias; Remove(name) removes one; GetAll() returns a snapshot. TryExpand(commandLine)
+  takes the raw text after the '/' (e.g. "weather Seattle"), matches the first word
+  against the alias map (case-insensitive), and returns the fully expanded command
+  string including a leading '/' (e.g. "/msg #weather Seattle") or null when no alias
+  matches. Substitution is single-pass to prevent double-substitution when arguments
+  themselves contain '%' tokens: %1..%9 expand to individual whitespace-delimited
+  arguments (empty string when the argument is absent), %* expands to all arguments
+  joined by a single space. HandleAlias(args) implements the /alias command: no args
+  lists all aliases alphabetically, one-word args shows a single alias definition,
+  "name expansion" adds or replaces. HandleUnalias(name) implements /unalias.
+  AliasesChanged event fires on Set and successful Remove so callers can persist to
+  config. Expansions stored with or without a leading '/' are both handled correctly.
+- AppConfig.Aliases (storage/config/Schema.cs): Dictionary<string, string> field added
+  to AppConfig; stores alias name -> expansion pairs. Schema version bumped from 1 to 2.
+- Config schema v2 migration (storage/config/Loader.cs): MigrateToV2 adds an empty
+  "aliases" JSON object to v1 config files and sets schema_version to 2.
+- 37 new alias tests (tests/DataJack.Core.Tests/AliasManagerTests.cs): constructor
+  initialization (3), Set/GetAll semantics (6), Remove (3), AliasesChanged event (3),
+  TryExpand null/no-match (2), %1 substitution (3), %2..%9 (2), %* (2), mixed tokens
+  (2), expansion without leading slash (1), case-insensitive lookup (2), HandleAlias
+  list/show/set (5), HandleUnalias (3).
+- 4 new config tests (tests/DataJack.Core.Tests/ConfigTests.cs): Default_Aliases_IsEmpty,
+  Default_Config_SchemaVersionIsTwo, Loader_RoundTrip_PreservesAliases,
+  Loader_MigratesV1ToV2_AddsEmptyAliases.
+
 - Phase 3 built-in command set (core/irc/CommandRouter.cs): 21 new methods on
   IRCCommandRouter. Channel operator actions: KickAsync (KICK), BanAsync /
   UnbanAsync (MODE +/-b), KickBanAsync (MODE +b then KICK in one call),

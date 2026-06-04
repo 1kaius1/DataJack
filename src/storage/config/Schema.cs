@@ -8,15 +8,16 @@ namespace DataJack.Core.Storage.Config;
 
 /// <summary>The root application configuration object, versioned for forward migration.</summary>
 public sealed record AppConfig(
-    [property: JsonPropertyName("schema_version")] int SchemaVersion,
-    [property: JsonPropertyName("identity")]    IdentitySettings    Identity,
-    [property: JsonPropertyName("servers")]     List<ServerEntry>   Servers,
-    [property: JsonPropertyName("appearance")]  AppearanceSettings  Appearance,
-    [property: JsonPropertyName("logging")]     LoggingSettings     Logging,
-    [property: JsonPropertyName("advanced")]    AdvancedSettings    Advanced)
+    [property: JsonPropertyName("schema_version")] int                        SchemaVersion,
+    [property: JsonPropertyName("identity")]    IdentitySettings               Identity,
+    [property: JsonPropertyName("servers")]     List<ServerEntry>              Servers,
+    [property: JsonPropertyName("appearance")]  AppearanceSettings             Appearance,
+    [property: JsonPropertyName("logging")]     LoggingSettings                Logging,
+    [property: JsonPropertyName("advanced")]    AdvancedSettings               Advanced,
+    [property: JsonPropertyName("aliases")]     Dictionary<string, string>     Aliases)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -25,7 +26,8 @@ public sealed record AppConfig(
         Servers:       new List<ServerEntry>(),
         Appearance:    AppearanceSettings.Default(),
         Logging:       LoggingSettings.Default(),
-        Advanced:      AdvancedSettings.Default());
+        Advanced:      AdvancedSettings.Default(),
+        Aliases:       new Dictionary<string, string>());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>

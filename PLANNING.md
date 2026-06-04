@@ -118,7 +118,11 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   `/unignore` (require ignore-list manager), `/timer` (requires timer subsystem),
   `/set` (requires config access), `/help` (requires help-text registry), `/connect`,
   `/reconnect` (require multi-server bootstrap).
-- [ ] Alias system: `/alias` command; `%1`/`%*` substitution; stored in config
+- [x] Alias system: `AliasManager` with `/alias` and `/unalias` command handlers;
+  single-pass `%1`..`%9` and `%*` argument substitution; case-insensitive name
+  lookup; `AliasesChanged` event for config persistence; aliases stored in
+  `AppConfig.Aliases` (schema v2); schema v2 migration adds empty aliases map
+  to existing v1 configs.
 - [ ] `ServerListDialog`: complete — all fields (SASL credentials, auto-join, connect commands); import/export JSON
 - [ ] `NotificationService`: highlight and PM desktop notifications on all three platforms
   - Windows: WinRT `ToastNotificationManager`
