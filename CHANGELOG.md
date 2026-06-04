@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 3 built-in command set (core/irc/CommandRouter.cs): 21 new methods on
+  IRCCommandRouter. Channel operator actions: KickAsync (KICK), BanAsync /
+  UnbanAsync (MODE +/-b), KickBanAsync (MODE +b then KICK in one call),
+  OpAsync / DeopAsync (MODE +/-o), VoiceAsync / DevoiceAsync (MODE +/-v),
+  ModeAsync (general MODE with optional parameter list). Channel info:
+  InviteAsync (INVITE), TopicAsync (TOPIC set or bare clear), NamesAsync
+  (NAMES), ListAsync (LIST with optional filter). User queries: WhoisAsync
+  (WHOIS), WhoAsync (WHO). User interaction: QueryAsync (PRIVMSG if message
+  provided, no-op if not), MeAsync (CTCP ACTION), CtcpAsync (arbitrary CTCP
+  request), PingAsync (CTCP PING with UTC millisecond timestamp). Away:
+  AwayAsync (AWAY with message or bare), BackAsync (bare AWAY). All new
+  methods follow the same argument-validation pattern as Phase 1 commands.
+- 40 new command router tests (tests/DataJack.Core.Tests/CommandRouterTests.cs)
+  covering exact wire format for every new command: kick with and without
+  reason, ban/unban mask, kickban two-line sequence, op/deop/voice/devoice,
+  mode with and without params, invite, topic set and clear, names with and
+  without channel, list with and without filter, whois, who with and without
+  mask, query with and without message, me CTCP ACTION, ctcp with and without
+  params, ping SOH-wrapped timestamp, away with message and bare, back; plus
+  validation-error assertions for invalid channel, nick, empty mask/command.
+
 - IRCStateUpdater (core/state/IRCStateUpdater.cs): one instance per server;
   subscribes to all IRC protocol events on the event dispatch thread and drives
   IRCStateModel.Apply to keep the snapshot tree current. Handles: connection

@@ -258,4 +258,383 @@ public sealed class CommandRouterTests : IAsyncDisposable
         await ConnectAsync();
         await Assert.ThrowsAsync<ArgumentException>(() => _router.RawAsync(line));
     }
+
+    // ---------------------------------------------------------------------------
+    // KICK
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task KickAsync_NoReason_SendsCorrectLine()
+    {
+        await ConnectAsync();
+        await _router.KickAsync("#test", "alice");
+        Assert.Equal("KICK #test alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task KickAsync_WithReason_IncludesColonReason()
+    {
+        await ConnectAsync();
+        await _router.KickAsync("#test", "alice", "spamming");
+        Assert.Equal("KICK #test alice :spamming", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task KickAsync_InvalidChannel_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.KickAsync("notachannel", "alice"));
+    }
+
+    [Fact]
+    public async Task KickAsync_InvalidNick_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.KickAsync("#test", ""));
+    }
+
+    // ---------------------------------------------------------------------------
+    // BAN / UNBAN
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task BanAsync_SendsModePlusBLine()
+    {
+        await ConnectAsync();
+        await _router.BanAsync("#test", "alice!*@*");
+        Assert.Equal("MODE #test +b alice!*@*", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task UnbanAsync_SendsModeMinusBLine()
+    {
+        await ConnectAsync();
+        await _router.UnbanAsync("#test", "alice!*@*");
+        Assert.Equal("MODE #test -b alice!*@*", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task BanAsync_EmptyMask_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.BanAsync("#test", ""));
+    }
+
+    // ---------------------------------------------------------------------------
+    // KICKBAN
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task KickBanAsync_NoReason_SendsBanThenKick()
+    {
+        await ConnectAsync();
+        await _router.KickBanAsync("#test", "alice", "alice!*@*");
+        Assert.Equal("MODE #test +b alice!*@*", await ReadLineAsync());
+        Assert.Equal("KICK #test alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task KickBanAsync_WithReason_KickLineIncludesReason()
+    {
+        await ConnectAsync();
+        await _router.KickBanAsync("#test", "alice", "alice!*@*", "flooding");
+        Assert.Equal("MODE #test +b alice!*@*", await ReadLineAsync());
+        Assert.Equal("KICK #test alice :flooding", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // OP / DEOP / VOICE / DEVOICE
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task OpAsync_SendsModeOpLine()
+    {
+        await ConnectAsync();
+        await _router.OpAsync("#test", "alice");
+        Assert.Equal("MODE #test +o alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task DeopAsync_SendsModeMinusOpLine()
+    {
+        await ConnectAsync();
+        await _router.DeopAsync("#test", "alice");
+        Assert.Equal("MODE #test -o alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task VoiceAsync_SendsModeVoiceLine()
+    {
+        await ConnectAsync();
+        await _router.VoiceAsync("#test", "alice");
+        Assert.Equal("MODE #test +v alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task DevoiceAsync_SendsModeMinusVoiceLine()
+    {
+        await ConnectAsync();
+        await _router.DevoiceAsync("#test", "alice");
+        Assert.Equal("MODE #test -v alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task OpAsync_InvalidChannel_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.OpAsync("notachan", "alice"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // MODE (general)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ModeAsync_NoParams_SendsModeString()
+    {
+        await ConnectAsync();
+        await _router.ModeAsync("#test", "+mn");
+        Assert.Equal("MODE #test +mn", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task ModeAsync_WithParams_AppendsParamsSpaceSeparated()
+    {
+        await ConnectAsync();
+        await _router.ModeAsync("#test", "+kl", ["secretkey", "50"]);
+        Assert.Equal("MODE #test +kl secretkey 50", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task ModeAsync_EmptyModeString_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.ModeAsync("#test", ""));
+    }
+
+    // ---------------------------------------------------------------------------
+    // INVITE
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task InviteAsync_SendsInviteLine()
+    {
+        await ConnectAsync();
+        await _router.InviteAsync("alice", "#secret");
+        Assert.Equal("INVITE alice #secret", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task InviteAsync_InvalidChannel_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.InviteAsync("alice", "notachannel"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // TOPIC
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task TopicAsync_WithText_SendsTopicLine()
+    {
+        await ConnectAsync();
+        await _router.TopicAsync("#test", "Welcome to the channel");
+        Assert.Equal("TOPIC #test :Welcome to the channel", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task TopicAsync_NoText_SendsBareTopicToQueryOrClear()
+    {
+        await ConnectAsync();
+        await _router.TopicAsync("#test");
+        Assert.Equal("TOPIC #test", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // NAMES
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task NamesAsync_WithChannel_SendsNamesLine()
+    {
+        await ConnectAsync();
+        await _router.NamesAsync("#test");
+        Assert.Equal("NAMES #test", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task NamesAsync_NoChannel_SendsBareNames()
+    {
+        await ConnectAsync();
+        await _router.NamesAsync();
+        Assert.Equal("NAMES", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // LIST
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ListAsync_NoFilter_SendsBareList()
+    {
+        await ConnectAsync();
+        await _router.ListAsync();
+        Assert.Equal("LIST", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task ListAsync_WithFilter_AppendsFilter()
+    {
+        await ConnectAsync();
+        await _router.ListAsync(">50");
+        Assert.Equal("LIST >50", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // WHOIS / WHO
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhoisAsync_SendsWhoisLine()
+    {
+        await ConnectAsync();
+        await _router.WhoisAsync("alice");
+        Assert.Equal("WHOIS alice", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task WhoisAsync_EmptyNick_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.WhoisAsync(""));
+    }
+
+    [Fact]
+    public async Task WhoAsync_WithMask_SendsWhoLine()
+    {
+        await ConnectAsync();
+        await _router.WhoAsync("#test");
+        Assert.Equal("WHO #test", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task WhoAsync_NoMask_SendsBareWho()
+    {
+        await ConnectAsync();
+        await _router.WhoAsync();
+        Assert.Equal("WHO", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // QUERY
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task QueryAsync_WithMessage_SendsPrivmsg()
+    {
+        await ConnectAsync();
+        await _router.QueryAsync("alice", "hey there");
+        Assert.Equal("PRIVMSG alice :hey there", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task QueryAsync_NoMessage_SendsNothingAndCompletes()
+    {
+        await ConnectAsync();
+        // No protocol line sent; task should complete without blocking.
+        await _router.QueryAsync("alice");
+        // No line to read; confirm the connection is still open by sending a known line.
+        await _router.RawAsync("PING :test");
+        Assert.Equal("PING :test", await ReadLineAsync());
+    }
+
+    // ---------------------------------------------------------------------------
+    // ME (/me — CTCP ACTION)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task MeAsync_SendsCtcpActionLine()
+    {
+        await ConnectAsync();
+        await _router.MeAsync("#test", "waves hello");
+        Assert.Equal("PRIVMSG #test :ACTION waves hello\x01", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task MeAsync_EmptyText_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.MeAsync("#test", ""));
+    }
+
+    // ---------------------------------------------------------------------------
+    // CTCP
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CtcpAsync_NoParams_SendsWrappedCommand()
+    {
+        await ConnectAsync();
+        await _router.CtcpAsync("alice", "VERSION");
+        Assert.Equal("PRIVMSG alice :\x01VERSION\x01", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task CtcpAsync_WithParams_IncludesParams()
+    {
+        await ConnectAsync();
+        await _router.CtcpAsync("alice", "DCC", "SEND file.txt 0 1234 512");
+        Assert.Equal("PRIVMSG alice :DCC SEND file.txt 0 1234 512\x01", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task CtcpAsync_EmptyCommand_Throws()
+    {
+        await ConnectAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => _router.CtcpAsync("alice", ""));
+    }
+
+    // ---------------------------------------------------------------------------
+    // PING (CTCP)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PingAsync_SendsCtcpPingWithTimestamp()
+    {
+        await ConnectAsync();
+        await _router.PingAsync("alice");
+        var line = await ReadLineAsync();
+        Assert.NotNull(line);
+        Assert.StartsWith("PRIVMSG alice :\x01PING ", line!);
+        Assert.EndsWith("\x01", line);
+    }
+
+    // ---------------------------------------------------------------------------
+    // AWAY / BACK
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task AwayAsync_WithMessage_SendsAwayLine()
+    {
+        await ConnectAsync();
+        await _router.AwayAsync("Be right back");
+        Assert.Equal("AWAY :Be right back", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task AwayAsync_NoMessage_SendsBareAway()
+    {
+        await ConnectAsync();
+        await _router.AwayAsync();
+        Assert.Equal("AWAY", await ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task BackAsync_SendsBareAway()
+    {
+        await ConnectAsync();
+        await _router.BackAsync();
+        Assert.Equal("AWAY", await ReadLineAsync());
+    }
 }

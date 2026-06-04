@@ -107,7 +107,17 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   nick rename), topic + creation time, channel and prefix modes, NAMES user list with
   prefix-to-mode mapping, WHO/WHOIS user-info backfill, CHGHOST, away status, account,
   realname (SETNAME), and MONITOR online/offline status.
-- [ ] Full built-in command set (ARCHITECTURE.md §13): `/kick`, `/ban`, `/mode`, `/op`, `/voice`, `/whois`, `/who`, `/ignore`, `/list`, `/names`, `/timer`, `/help`, etc.
+- [x] Full built-in command set (ARCHITECTURE.md §13): 21 new methods added to
+  `IRCCommandRouter`: `/kick` (KICK), `/ban`+`/unban` (MODE +/-b), `/kickban` (MODE +b
+  then KICK), `/op`+`/deop` (MODE +/-o), `/voice`+`/devoice` (MODE +/-v), `/mode`
+  (general MODE with optional parameter list), `/invite` (INVITE), `/topic` (TOPIC
+  set/clear), `/names` (NAMES), `/list` (LIST with optional filter), `/whois` (WHOIS),
+  `/who` (WHO), `/query` (PRIVMSG on message or no-op), `/me` (CTCP ACTION), `/ctcp`
+  (arbitrary CTCP request), `/ping` (CTCP PING with UTC millisecond timestamp),
+  `/away`+`/back` (AWAY set/clear). Commands deferred to later tasks: `/ignore`,
+  `/unignore` (require ignore-list manager), `/timer` (requires timer subsystem),
+  `/set` (requires config access), `/help` (requires help-text registry), `/connect`,
+  `/reconnect` (require multi-server bootstrap).
 - [ ] Alias system: `/alias` command; `%1`/`%*` substitution; stored in config
 - [ ] `ServerListDialog`: complete — all fields (SASL credentials, auto-join, connect commands); import/export JSON
 - [ ] `NotificationService`: highlight and PM desktop notifications on all three platforms
