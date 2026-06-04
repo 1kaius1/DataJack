@@ -143,7 +143,19 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
     `UNUserNotificationCenter` — native P/Invoke binding deferred pending code-signing)
   - Windows: `WindowsNotificationService` (PowerShell WinRT script; target is WinRT
     C# projection — deferred pending net10.0-windows retarget)
-- [ ] Highlight pattern matching: literal (case-insensitive), wildcard, regex; current nick always implicit
+- [x] Highlight pattern matching: `HighlightMatcher` (core/irc/HighlightMatcher.cs) — static,
+  thread-safe. `HighlightPatternKind` enum (Literal/Wildcard/Regex) and `HighlightPattern`
+  record (Expression, Kind, CaseSensitive) added to config schema (storage/config/Schema.cs).
+  `IsHighlight(text, currentNick, patterns)`: checks the current nick as a whole word
+  first (ContainsNickAsWord), then evaluates each configured pattern. `Matches(text, pattern)`:
+  Literal — OrdinalIgnoreCase (or Ordinal when CaseSensitive); Wildcard — glob converted to
+  anchored regex via GlobToRegex (`*`→`.*`, `?`→`.`, regex metacharacters escaped), always
+  case-insensitive; Regex — full .NET regex with 100 ms timeout, invalid patterns return
+  false. `AppConfig.HighlightPatterns` stored as JSON array; schema bumped to v3; migration
+  v3 adds empty array to existing v2 configs. `NotificationDispatcher` updated to accept
+  optional `Func<IReadOnlyList<HighlightPattern>>` patternsGetter and delegate the channel
+  highlight check to `HighlightMatcher.IsHighlight` (existing nick-only behavior preserved
+  when getter is null).
 - [ ] Log search: SQLite FTS5 index; `nick:`, `server:`, date range filters; paginated results
 - [ ] Log archive: compression (gzip/zstd); configurable rotation age; `ExportManager` (plain text and HTML)
 - [ ] SOCKS5 proxy transport; per-server proxy config; remote DNS resolution (no DNS leaks)

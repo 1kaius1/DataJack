@@ -102,6 +102,8 @@ public sealed class ConfigLoader
         1 => JsonSerializer.SerializeToNode(AppConfig.Default(), s_jsonOptions)!,
         // v2 adds the "aliases" object for user-defined command aliases (AliasManager).
         2 => MigrateToV2(node),
+        // v3 adds the "highlight_patterns" array for user-configured highlight patterns.
+        3 => MigrateToV3(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -111,6 +113,15 @@ public sealed class ConfigLoader
             obj["aliases"] = new System.Text.Json.Nodes.JsonObject();
 
         node["schema_version"] = 2;
+        return node;
+    }
+
+    private static JsonNode MigrateToV3(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj && obj["highlight_patterns"] is null)
+            obj["highlight_patterns"] = new System.Text.Json.Nodes.JsonArray();
+
+        node["schema_version"] = 3;
         return node;
     }
 }

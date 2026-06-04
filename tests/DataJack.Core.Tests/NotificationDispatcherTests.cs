@@ -88,42 +88,6 @@ public sealed class NotificationDispatcherTests : IAsyncDisposable
         new(Server, from, from, text, null);
 
     // ---------------------------------------------------------------------------
-    // ContainsNickAsWord — unit tests for the internal helper
-    // ---------------------------------------------------------------------------
-
-    [Fact]
-    public void ContainsNickAsWord_EmptyNick_ReturnsFalse()
-        => Assert.False(NotificationDispatcher.ContainsNickAsWord("hello world", ""));
-
-    [Fact]
-    public void ContainsNickAsWord_NickAlone_ReturnsTrue()
-        => Assert.True(NotificationDispatcher.ContainsNickAsWord("TestUser", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_NickAtStart_ReturnsTrue()
-        => Assert.True(NotificationDispatcher.ContainsNickAsWord("TestUser: hello!", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_NickAtEnd_ReturnsTrue()
-        => Assert.True(NotificationDispatcher.ContainsNickAsWord("hey TestUser", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_NickInMiddle_ReturnsTrue()
-        => Assert.True(NotificationDispatcher.ContainsNickAsWord("hello TestUser, how are you?", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_NickEmbeddedInLongerWord_ReturnsFalse()
-        => Assert.False(NotificationDispatcher.ContainsNickAsWord("TestUserX is here", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_NickWithLeadingUnderscore_ReturnsFalse()
-        => Assert.False(NotificationDispatcher.ContainsNickAsWord("_TestUser is here", "TestUser"));
-
-    [Fact]
-    public void ContainsNickAsWord_CaseInsensitive_ReturnsTrue()
-        => Assert.True(NotificationDispatcher.ContainsNickAsWord("TESTUSER: hi", "TestUser"));
-
-    // ---------------------------------------------------------------------------
     // Private messages
     // ---------------------------------------------------------------------------
 

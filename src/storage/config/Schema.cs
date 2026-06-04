@@ -8,26 +8,28 @@ namespace DataJack.Core.Storage.Config;
 
 /// <summary>The root application configuration object, versioned for forward migration.</summary>
 public sealed record AppConfig(
-    [property: JsonPropertyName("schema_version")] int                        SchemaVersion,
-    [property: JsonPropertyName("identity")]    IdentitySettings               Identity,
-    [property: JsonPropertyName("servers")]     List<ServerEntry>              Servers,
-    [property: JsonPropertyName("appearance")]  AppearanceSettings             Appearance,
-    [property: JsonPropertyName("logging")]     LoggingSettings                Logging,
-    [property: JsonPropertyName("advanced")]    AdvancedSettings               Advanced,
-    [property: JsonPropertyName("aliases")]     Dictionary<string, string>     Aliases)
+    [property: JsonPropertyName("schema_version")]     int                        SchemaVersion,
+    [property: JsonPropertyName("identity")]           IdentitySettings           Identity,
+    [property: JsonPropertyName("servers")]            List<ServerEntry>          Servers,
+    [property: JsonPropertyName("appearance")]         AppearanceSettings         Appearance,
+    [property: JsonPropertyName("logging")]            LoggingSettings            Logging,
+    [property: JsonPropertyName("advanced")]           AdvancedSettings           Advanced,
+    [property: JsonPropertyName("aliases")]            Dictionary<string, string> Aliases,
+    [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
-        SchemaVersion: CurrentVersion,
-        Identity:      IdentitySettings.Default(),
-        Servers:       new List<ServerEntry>(),
-        Appearance:    AppearanceSettings.Default(),
-        Logging:       LoggingSettings.Default(),
-        Advanced:      AdvancedSettings.Default(),
-        Aliases:       new Dictionary<string, string>());
+        SchemaVersion:     CurrentVersion,
+        Identity:          IdentitySettings.Default(),
+        Servers:           new List<ServerEntry>(),
+        Appearance:        AppearanceSettings.Default(),
+        Logging:           LoggingSettings.Default(),
+        Advanced:          AdvancedSettings.Default(),
+        Aliases:           new Dictionary<string, string>(),
+        HighlightPatterns: new List<HighlightPattern>());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>
@@ -110,6 +112,31 @@ public sealed record LoggingSettings(
 {
     internal static LoggingSettings Default() => new(Enabled: true, LogDirectory: null);
 }
+
+// ---------------------------------------------------------------------------
+// Highlight pattern types
+// ---------------------------------------------------------------------------
+
+/// <summary>Determines how a highlight pattern expression is interpreted.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum HighlightPatternKind
+{
+    /// <summary>Case-insensitive (by default) substring match.</summary>
+    Literal,
+    /// <summary>Glob-style pattern: <c>*</c> matches any sequence, <c>?</c> matches one character. Always case-insensitive.</summary>
+    Wildcard,
+    /// <summary>Full .NET regular expression. Case sensitivity is controlled by <see cref="HighlightPattern.CaseSensitive"/>.</summary>
+    Regex,
+}
+
+/// <summary>
+/// One user-configured highlight pattern. The current nick is always an additional implicit
+/// pattern; it never needs to be added here.
+/// </summary>
+public sealed record HighlightPattern(
+    [property: JsonPropertyName("expression")]     string              Expression,
+    [property: JsonPropertyName("kind")]           HighlightPatternKind Kind,
+    [property: JsonPropertyName("case_sensitive")] bool                CaseSensitive = false);
 
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>
 public sealed record AdvancedSettings(

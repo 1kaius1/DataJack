@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- HighlightMatcher (core/irc/HighlightMatcher.cs): stateless, thread-safe static class for
+  evaluating highlight patterns against IRC message text. IsHighlight(text, currentNick,
+  patterns) checks the current nick as a whole word first (ContainsNickAsWord: OrdinalIgnoreCase,
+  bounded by non-alphanumeric/non-underscore chars or string edges, returns false for empty
+  nick), then evaluates each HighlightPattern in order and returns true on first match.
+  Matches(text, pattern) dispatches by HighlightPatternKind: Literal uses
+  OrdinalIgnoreCase (or Ordinal when CaseSensitive=true) substring search; Wildcard
+  converts the glob expression to an anchored .NET regex via GlobToRegex (* -> .*, ? -> .,
+  all other metacharacters escaped) and matches case-insensitively with a 100 ms timeout;
+  Regex compiles the expression with IgnoreCase unless CaseSensitive is set, applies a
+  100 ms timeout, and returns false on RegexParseException. Empty expressions always return
+  false. ContainsNickAsWord is public for use by scripts/plugins.
+
+- HighlightPattern (storage/config/Schema.cs): sealed record with Expression (string),
+  Kind (HighlightPatternKind enum, JSON-serialized as string via JsonStringEnumConverter),
+  and CaseSensitive (bool, default false). HighlightPatternKind enum: Literal, Wildcard,
+  Regex. AppConfig.HighlightPatterns (List<HighlightPattern>) added; schema version bumped
+  from 2 to 3; MigrateToV3 in Loader.cs adds an empty highlight_patterns array to v2 files.
+
+- NotificationDispatcher (platform/notifications/Service.cs): refactored channel highlight
+  detection to delegate to HighlightMatcher.IsHighlight. New optional constructor parameter
+  Func<IReadOnlyList<HighlightPattern>>? patternsGetter (default null) is invoked on each
+  channel message; null is treated as an empty pattern list. ContainsNickAsWord and
+  IsWordChar removed from NotificationDispatcher (now live in HighlightMatcher).
+
+- 50 new tests; 8 ContainsNickAsWord tests moved from NotificationDispatcherTests to
+  HighlightMatcherTests (DataJack.Core.Tests/HighlightMatcherTests.cs, 50 tests total):
+  9 ContainsNickAsWord tests (empty nick, standalone, start/end/middle/embedded/underscore-
+  prefix/case-insensitive/repeated-occurrence); 7 Literal tests (case-insensitive, exact,
+  substring, no-match, empty expression, case-sensitive-match, case-sensitive-no-match);
+  9 Wildcard tests (star alone, star at ends, star in middle, question mark match, question
+  mark too-short, case-insensitive, no match, empty, dot-escaped); 7 Regex tests (simple,
+  default-case-insensitive, case-sensitive-wrong-case, case-sensitive-correct-case, word-
+  boundary, invalid-pattern, empty); 4 GlobToRegex tests (star, question, dot-escaped,
+  anchored); 14 IsHighlight integration tests (null nick, nick match, nick no-match,
+  literal/wildcard/regex pattern, first/second pattern match, no-match, pattern-matches-
+  without-nick, nick-matches-without-pattern). 3 schema-v3 tests added to ConfigTests
+  (HighlightPatterns empty by default, schema version 3, v2→v3 migration, v1 full chain).
+  Stale Default_Config_SchemaVersionIsTwo test removed; Loader_MigratesV1ToV2 updated to
+  assert CurrentVersion and also check HighlightPatterns is present and empty.
+
 - NotificationService (platform/notifications/): INotificationService interface with
   IsSupported and NotifyAsync(NotificationInfo, CancellationToken). NotificationInfo
   record carries Title, Body, and NotificationKind (Highlight, PrivateMessage, DccOffer,
