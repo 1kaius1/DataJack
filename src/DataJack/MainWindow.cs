@@ -25,6 +25,7 @@ internal sealed class MainWindow : Window
     private readonly LayoutManager       _layout;
     private readonly ISpellCheckService  _spellService;
     private IdleMonitor?                 _idleMonitor;
+    private DebugLogger?                 _debugLogger;
 
     public MainWindow()
     {
@@ -77,6 +78,11 @@ internal sealed class MainWindow : Window
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
             _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
             _layout.SetSpellCheckService(_spellService);
+
+            // Start debug logger if a path is configured.
+            string? debugPath = _configLoader.Config.Advanced.DebugLogPath;
+            if (!string.IsNullOrWhiteSpace(debugPath))
+                _debugLogger = new DebugLogger(debugPath, _dispatcher);
 
             // Start the idle monitor if auto-away is configured.
             var awayCfg = _configLoader.Config.Away;
@@ -260,6 +266,7 @@ internal sealed class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _debugLogger?.Dispose();
         _idleMonitor?.Dispose();
         _layout.Dispose();
         _bufferManager.Dispose();

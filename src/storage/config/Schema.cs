@@ -21,7 +21,7 @@ public sealed record AppConfig(
     [property: JsonPropertyName("away")]               AwaySettings               Away)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -211,16 +211,22 @@ public sealed record AwaySettings(
 
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>
 public sealed record AdvancedSettings(
-    [property: JsonPropertyName("flood_token_capacity")]         double FloodTokenCapacity,
-    [property: JsonPropertyName("flood_drain_rate")]             double FloodDrainRate,
-    [property: JsonPropertyName("reconnect_initial_delay_sec")]  int    ReconnectInitialDelaySec,
-    [property: JsonPropertyName("reconnect_max_delay_sec")]      int    ReconnectMaxDelaySec,
-    [property: JsonPropertyName("reconnect_max_attempts")]       int    ReconnectMaxAttempts)
+    [property: JsonPropertyName("flood_token_capacity")]         double  FloodTokenCapacity,
+    [property: JsonPropertyName("flood_drain_rate")]             double  FloodDrainRate,
+    [property: JsonPropertyName("reconnect_initial_delay_sec")]  int     ReconnectInitialDelaySec,
+    [property: JsonPropertyName("reconnect_max_delay_sec")]      int     ReconnectMaxDelaySec,
+    [property: JsonPropertyName("reconnect_max_attempts")]       int     ReconnectMaxAttempts,
+    /// <summary>
+    /// When non-null, raw IRC I/O and connection lifecycle events are appended to this file.
+    /// PASS and AUTHENTICATE credential lines are redacted. Set to null to disable.
+    /// </summary>
+    [property: JsonPropertyName("log_debug")]                    string? DebugLogPath)
 {
     internal static AdvancedSettings Default() => new(
         FloodTokenCapacity:         10.0,
         FloodDrainRate:             2.0,
         ReconnectInitialDelaySec:   2,
         ReconnectMaxDelaySec:       300,
-        ReconnectMaxAttempts:       0);
+        ReconnectMaxAttempts:       0,
+        DebugLogPath:               null);
 }

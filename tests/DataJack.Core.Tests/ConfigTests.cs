@@ -273,10 +273,16 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsSeven()
+    public void Default_Config_SchemaVersionIsEight()
     {
-        Assert.Equal(7, AppConfig.CurrentVersion);
-        Assert.Equal(7, AppConfig.Default().SchemaVersion);
+        Assert.Equal(8, AppConfig.CurrentVersion);
+        Assert.Equal(8, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public void Default_Advanced_DebugLogPath_IsNull()
+    {
+        Assert.Null(AppConfig.Default().Advanced.DebugLogPath);
     }
 
     [Fact]
@@ -666,5 +672,71 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.Equal("Be right back", loader2.Config.Away.AwayMessage);
         Assert.True(loader2.Config.Away.AutoAwayEnabled);
         Assert.Equal(300, loader2.Config.Away.AutoAwayDelaySec);
+    }
+
+    // ---------------------------------------------------------------------------
+    // v7 → v8 migration: log_debug in advanced
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Loader_MigratesV7ToV8_AddsDebugLogPath()
+    {
+        string path = Path.Combine(_tempDir, "settings_v7.json");
+
+        string v7Json = """
+            {
+              "schema_version": 7,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000,
+                "layout_mode": "tabs"
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0
+              },
+              "aliases": {},
+              "highlight_patterns": [],
+              "archive": { "enabled": true, "max_age_days": 90 },
+              "dcc": { "download_directory": null, "auto_accept": false, "max_file_size_mb": 0 },
+              "away": { "message": "Away", "auto_away_enabled": false, "auto_away_delay_sec": 600 }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v7Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
+        Assert.Null(loader.Config.Advanced.DebugLogPath);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesDebugLogPath()
+    {
+        string path = Path.Combine(_tempDir, "settings_debuglog.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Advanced = loader.Config.Advanced with { DebugLogPath = "/tmp/datajack-debug.log" },
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.Equal("/tmp/datajack-debug.log", loader2.Config.Advanced.DebugLogPath);
     }
 }
