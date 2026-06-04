@@ -57,6 +57,8 @@ public sealed class InputBox : Border
 
     public InputBox(ThemeManager theme)
     {
+        Background = new SolidColorBrush(ThemeManager.ParseHex(theme.Theme.Chrome.InputBackground));
+
         _textBox = new TextBox
         {
             Background      = new SolidColorBrush(ThemeManager.ParseHex(theme.Theme.Chrome.InputBackground)),

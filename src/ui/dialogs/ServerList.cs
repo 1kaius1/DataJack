@@ -24,9 +24,10 @@ public sealed class ServerListDialog : Window
     private static readonly string[] SaslMechanisms =
         { "None", "SCRAM-SHA-512", "SCRAM-SHA-256", "EXTERNAL", "PLAIN" };
 
-    private readonly ConfigLoader   _loader;
+    private readonly ConfigLoader      _loader;
+    private readonly ChromeColors      _chrome;
     private readonly List<ServerEntry> _entries;
-    private readonly ListBox        _listBox;
+    private readonly ListBox           _listBox;
 
     // Edit-panel controls — connection
     private readonly TextBox  _txtNetwork;
@@ -64,25 +65,33 @@ public sealed class ServerListDialog : Window
     public ServerListDialog(ConfigLoader loader, ThemeManager theme)
     {
         _loader  = loader;
+        _chrome  = theme.Theme.Chrome;
         _entries = new List<ServerEntry>(loader.Config.Servers);
 
-        Title     = "Server List";
-        Width     = 730;
-        Height    = 580;
-        CanResize = true;
+        Title      = "Server List";
+        Width      = 730;
+        Height     = 580;
+        CanResize  = true;
+        Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background));
 
         // -----------------------------------------------------------------------
         // Root grid: list panel left | edit panel right / button bar bottom
         // -----------------------------------------------------------------------
 
-        var root = new Grid();
+        var root = new Grid
+        {
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background)),
+        };
         root.ColumnDefinitions.Add(new ColumnDefinition(220, GridUnitType.Pixel));
         root.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
         // ---- Left: server list + add/remove buttons ----
-        var leftPanel = new DockPanel();
+        var leftPanel = new DockPanel
+        {
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.TabBackground)),
+        };
         Grid.SetColumn(leftPanel, 0);
         Grid.SetRow(leftPanel, 0);
 
@@ -101,14 +110,24 @@ public sealed class ServerListDialog : Window
         DockPanel.SetDock(listButtons, Dock.Bottom);
         leftPanel.Children.Add(listButtons);
 
-        _listBox = new ListBox { Margin = new Thickness(4) };
+        _listBox = new ListBox
+        {
+            Margin     = new Thickness(4),
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.TabBackground)),
+            Foreground = new SolidColorBrush(ThemeManager.ParseHex(_chrome.TabForeground)),
+        };
         _listBox.SelectionChanged += OnSelectionChanged;
         leftPanel.Children.Add(_listBox);
 
         root.Children.Add(leftPanel);
 
         // ---- Right: scrollable edit form ----
-        var form = new StackPanel { Margin = new Thickness(8, 4, 8, 4), Spacing = 5 };
+        var form = new StackPanel
+        {
+            Margin     = new Thickness(8, 4, 8, 4),
+            Spacing    = 5,
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background)),
+        };
         Grid.SetColumn(form, 1);
         Grid.SetRow(form, 0);
 
@@ -151,7 +170,8 @@ public sealed class ServerListDialog : Window
 
         var scrollForm = new ScrollViewer
         {
-            Content             = form,
+            Content                       = form,
+            Background                    = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background)),
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
         };
         Grid.SetColumn(scrollForm, 1);
@@ -159,7 +179,11 @@ public sealed class ServerListDialog : Window
         root.Children.Add(scrollForm);
 
         // ---- Bottom button bar ----
-        var bottomBar = new DockPanel { Margin = new Thickness(8, 4) };
+        var bottomBar = new DockPanel
+        {
+            Margin     = new Thickness(8, 4),
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.TabBackground)),
+        };
         Grid.SetColumnSpan(bottomBar, 2);
         Grid.SetRow(bottomBar, 1);
 
@@ -202,17 +226,18 @@ public sealed class ServerListDialog : Window
     // Form layout helpers
     // ---------------------------------------------------------------------------
 
-    private static void AddSectionLabel(StackPanel form, string text)
+    private void AddSectionLabel(StackPanel form, string text)
     {
         form.Children.Add(new TextBlock
         {
             Text       = text,
             FontWeight = FontWeight.SemiBold,
             Margin     = new Thickness(0, 6, 0, 0),
+            Foreground = new SolidColorBrush(ThemeManager.ParseHex(_chrome.TabActiveForeground)),
         });
     }
 
-    private static T AddFormRow<T>(StackPanel form, string label, T control) where T : Control
+    private T AddFormRow<T>(StackPanel form, string label, T control) where T : Control
     {
         var row = new DockPanel { Margin = new Thickness(0, 1) };
         var lbl = new TextBlock
@@ -221,17 +246,39 @@ public sealed class ServerListDialog : Window
             Width             = 200,
             VerticalAlignment = VerticalAlignment.Top,
             Margin            = new Thickness(0, 3, 6, 0),
+            Foreground        = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Foreground)),
         };
         DockPanel.SetDock(lbl, Dock.Left);
         row.Children.Add(lbl);
+
+        // Apply theme colors to the input control.
+        switch (control)
+        {
+            case TextBox tb:
+                tb.Background  = new SolidColorBrush(ThemeManager.ParseHex(_chrome.InputBackground));
+                tb.Foreground  = new SolidColorBrush(ThemeManager.ParseHex(_chrome.InputForeground));
+                tb.CaretBrush  = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Foreground));
+                break;
+            case ComboBox cb:
+                cb.Background  = new SolidColorBrush(ThemeManager.ParseHex(_chrome.InputBackground));
+                cb.Foreground  = new SolidColorBrush(ThemeManager.ParseHex(_chrome.InputForeground));
+                break;
+        }
+
         row.Children.Add(control);
         form.Children.Add(row);
         return control;
     }
 
-    private static CheckBox AddFormCheck(StackPanel form, string label, bool defaultValue)
+    private CheckBox AddFormCheck(StackPanel form, string label, bool defaultValue)
     {
-        var cb = new CheckBox { Content = label, IsChecked = defaultValue, Margin = new Thickness(0, 1) };
+        var cb = new CheckBox
+        {
+            Content    = label,
+            IsChecked  = defaultValue,
+            Margin     = new Thickness(0, 1),
+            Foreground = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Foreground)),
+        };
         form.Children.Add(cb);
         return cb;
     }
@@ -417,11 +464,12 @@ public sealed class ServerListDialog : Window
     {
         var dlg = new Window
         {
-            Title                   = "Error",
-            Width                   = 420,
-            Height                  = 140,
-            WindowStartupLocation   = WindowStartupLocation.CenterOwner,
-            CanResize               = false,
+            Title                 = "Error",
+            Width                 = 420,
+            Height                = 140,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize             = false,
+            Background            = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background)),
         };
 
         var okBtn = new Button
@@ -434,10 +482,16 @@ public sealed class ServerListDialog : Window
 
         dlg.Content = new StackPanel
         {
-            Margin   = new Thickness(16),
-            Children =
+            Margin     = new Thickness(16),
+            Background = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Background)),
+            Children   =
             {
-                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                new TextBlock
+                {
+                    Text         = message,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground   = new SolidColorBrush(ThemeManager.ParseHex(_chrome.Foreground)),
+                },
                 okBtn,
             },
         };
