@@ -108,6 +108,8 @@ public sealed class ConfigLoader
         4 => MigrateToV4(node),
         // v5 adds the "dcc" object for DCC file transfer configuration.
         5 => MigrateToV5(node),
+        // v6 adds "layout_mode" to the "appearance" object for tree/tabs navigation.
+        6 => MigrateToV6(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -157,6 +159,19 @@ public sealed class ConfigLoader
         }
 
         node["schema_version"] = 5;
+        return node;
+    }
+
+    private static JsonNode MigrateToV6(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject root &&
+            root["appearance"] is System.Text.Json.Nodes.JsonObject appearance &&
+            appearance["layout_mode"] is null)
+        {
+            appearance["layout_mode"] = "tabs";
+        }
+
+        node["schema_version"] = 6;
         return node;
     }
 }

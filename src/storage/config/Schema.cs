@@ -20,7 +20,7 @@ public sealed record AppConfig(
     [property: JsonPropertyName("dcc")]                DccSettings                Dcc)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -107,7 +107,12 @@ public sealed record AppearanceSettings(
     [property: JsonPropertyName("font_size")]         double? FontSize,
     [property: JsonPropertyName("show_timestamps")]   bool    ShowTimestamps,
     [property: JsonPropertyName("timestamp_format")]  string  TimestampFormat,
-    [property: JsonPropertyName("scrollback_limit")]  int     ScrollbackLimit)
+    [property: JsonPropertyName("scrollback_limit")]  int     ScrollbackLimit,
+    /// <summary>
+    /// Navigation panel layout. <c>"tabs"</c> = HexChat-style horizontal tab bar
+    /// (default). <c>"tree"</c> = mIRC-style vertical server/channel tree sidebar.
+    /// </summary>
+    [property: JsonPropertyName("layout_mode")]       string  LayoutMode)
 {
     internal static AppearanceSettings Default() => new(
         ThemeName:       "default",
@@ -115,7 +120,8 @@ public sealed record AppearanceSettings(
         FontSize:        null,
         ShowTimestamps:  true,
         TimestampFormat: "HH:mm",
-        ScrollbackLimit: 5000);
+        ScrollbackLimit: 5000,
+        LayoutMode:      "tabs");
 }
 
 /// <summary>Log file settings.</summary>

@@ -273,10 +273,17 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsFive()
+    public void Default_Config_SchemaVersionIsSix()
     {
-        Assert.Equal(5, AppConfig.CurrentVersion);
-        Assert.Equal(5, AppConfig.Default().SchemaVersion);
+        Assert.Equal(6, AppConfig.CurrentVersion);
+        Assert.Equal(6, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public void Default_Appearance_LayoutModeIsTabs()
+    {
+        var config = AppConfig.Default();
+        Assert.Equal("tabs", config.Appearance.LayoutMode);
     }
 
     [Fact]
@@ -338,8 +345,9 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.NotNull(loader.Config.Archive);
         Assert.True(loader.Config.Archive.Enabled);
         Assert.Equal(90, loader.Config.Archive.MaxAgeDays);
-        // v4 -> v5 migration also runs, so Dcc settings must be present.
+        // v4->v5 and v5->v6 also run.
         Assert.NotNull(loader.Config.Dcc);
+        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
     }
 
     [Fact]
@@ -378,11 +386,73 @@ public sealed class ConfigTests : IAsyncDisposable
         var loader = new ConfigLoader(path);
         await loader.LoadAsync();
 
-        Assert.Equal(5, loader.Config.SchemaVersion);
+        // v4 → v5 → v6 all run, result is always current version.
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
         Assert.NotNull(loader.Config.Dcc);
         Assert.Null(loader.Config.Dcc.DownloadDirectory);
         Assert.False(loader.Config.Dcc.AutoAccept);
         Assert.Equal(0, loader.Config.Dcc.MaxFileSizeMb);
+        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
+    }
+
+    [Fact]
+    public async Task Loader_MigratesV5ToV6_AddsLayoutMode()
+    {
+        string path = Path.Combine(_tempDir, "settings_v5.json");
+
+        string v5Json = """
+            {
+              "schema_version": 5,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0
+              },
+              "aliases": {},
+              "highlight_patterns": [],
+              "archive": { "enabled": true, "max_age_days": 90 },
+              "dcc": { "download_directory": null, "auto_accept": false, "max_file_size_mb": 0 }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v5Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(6, loader.Config.SchemaVersion);
+        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesLayoutMode()
+    {
+        string path = Path.Combine(_tempDir, "settings_layout.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Appearance = loader.Config.Appearance with { LayoutMode = "tree" },
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.Equal("tree", loader2.Config.Appearance.LayoutMode);
     }
 
     [Fact]

@@ -217,7 +217,12 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   resumes from the confirmed offset using DccReceiver with append mode.
   Sender role: incoming DCC RESUME CTCP stores the offset in _confirmedResumeOffsets
   and replies DCC ACCEPT; background send task seeks to offset via DccSender.
-- [ ] `LayoutManager`: tree view (mIRC-style server → channel hierarchy)
+- [x] `LayoutManager`: tree view (mIRC-style server → channel hierarchy).
+  LayoutManager gains two modes: "tabs" (Phase 2 tab bar) and "tree" (200 px
+  sidebar TreeView). Buffers grouped under collapsible server nodes; global buffers
+  at root level. SetLayoutMode/ToggleLayoutMode/CurrentLayoutMode API.
+  /layout command in MainWindow persists mode to AppearanceSettings.LayoutMode
+  (schema v6, migration v6 adds layout_mode="tabs" to existing configs).
 - [ ] Spell checking: platform-specific backends
   - Windows: WinRT spell check API
   - macOS: `NSSpellChecker`

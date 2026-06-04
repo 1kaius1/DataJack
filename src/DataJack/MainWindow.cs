@@ -36,7 +36,10 @@ internal sealed class MainWindow : Window
         _themeManager  = new ThemeManager();
         _dispatcher    = new EventDispatcher();
         _bufferManager = new BufferManager(_dispatcher);
-        _layout        = new LayoutManager(_bufferManager, _themeManager);
+        // LayoutMode is loaded from config during BootstrapAsync; pass the default here
+        // so the layout is usable before config loads. BootstrapAsync calls SetLayoutMode
+        // again once the real preference is known.
+        _layout = new LayoutManager(_bufferManager, _themeManager);
 
         Content = _layout;
 
@@ -65,6 +68,7 @@ internal sealed class MainWindow : Window
             await _configLoader.LoadAsync();
 
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
+            _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
             _dispatcher.Start();
 
             ApplyTheme();
@@ -126,6 +130,10 @@ internal sealed class MainWindow : Window
                 OpenServerList();
                 break;
 
+            case "LAYOUT":
+                HandleLayoutCommand(args);
+                break;
+
             default:
                 // TODO Phase 3: route through IRCCommandRouter once connections are managed.
                 _ = server;
@@ -144,6 +152,30 @@ internal sealed class MainWindow : Window
     // ---------------------------------------------------------------------------
     // Connection management
     // ---------------------------------------------------------------------------
+
+    private void HandleLayoutCommand(string args)
+    {
+        string target = args.Trim().ToLowerInvariant();
+        string newMode = target switch
+        {
+            "toggle"            => _layout.CurrentLayoutMode == "tabs" ? "tree" : "tabs",
+            "tabs" or "tab"     => "tabs",
+            "tree"              => "tree",
+            _                   => string.Empty,
+        };
+
+        if (string.IsNullOrEmpty(newMode))
+            return;
+
+        _layout.SetLayoutMode(newMode);
+
+        // Persist the preference to config (fire-and-forget; non-critical).
+        var updated = _configLoader.Config with
+        {
+            Appearance = _configLoader.Config.Appearance with { LayoutMode = newMode },
+        };
+        _ = _configLoader.UpdateAsync(updated);
+    }
 
     private void HandleConnectCommand(string args)
     {

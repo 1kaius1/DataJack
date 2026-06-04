@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- LayoutManager tree view (ui/layout/LayoutManager.cs): mIRC-style vertical
+  server/channel tree sidebar as an alternative to the HexChat-style tab bar.
+  Two layout modes are now supported: "tabs" (Phase 2 default — horizontal TabControl
+  at the top) and "tree" (new — fixed-width 200 px TreeView sidebar on the left).
+  In tree mode the tab bar is hidden; buffers are grouped under collapsible server
+  parent nodes (expanded by default). Global buffers (NetworkStatus, Highlights) sit
+  at the root level outside any server group. Leaf nodes carry a kind prefix: "#" for
+  channels, "~" for queries, "D" for DCC chat, "!" for notices, "%" for the raw log.
+  Unread messages are signalled by changing the node foreground to the theme's
+  TabUnreadForeground color (same heuristic as the tab bar). Selecting a node activates
+  its buffer identically to selecting a tab. Switching modes preserves the active buffer
+  and restores its selection in the target view.
+
+  SetLayoutMode(mode): switches to "tabs" or "tree" instantly; ignores illegal values.
+  ToggleLayoutMode(): flips between the two modes.
+  CurrentLayoutMode property: returns the active mode string.
+
+  /layout command (MainWindow.cs): /layout tabs|tree|toggle switches the mode and
+  persists the preference to config. /layout toggle flips between the two modes.
+
+  LayoutMode (storage/config/Schema.cs): added to AppearanceSettings as
+  "layout_mode" (string, default "tabs"). Schema version bumped 5 -> 6.
+  MigrateToV6 in Loader.cs adds "layout_mode": "tabs" to the "appearance" object
+  of existing v5 configs. BootstrapAsync in MainWindow.cs calls
+  _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode) after loading
+  config so the persisted preference is applied on startup.
+
+  3 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsSix,
+  Default_Appearance_LayoutModeIsTabs, Loader_MigratesV5ToV6_AddsLayoutMode,
+  Loader_RoundTrip_PreservesLayoutMode. Existing v3-to-v4 and v4-to-v5 migration
+  tests updated to assert AppConfig.CurrentVersion (version-agnostic) and check
+  that the layout_mode field is present after the full migration chain.
+
 - DCC RESUME (core/protocol/dcc/Engine.cs, Transfer.cs): transfer restart at byte offset.
   DccCtcpParser.TryParseResumeOrAccept parses the shared RESUME / ACCEPT CTCP format
   (RESUME|ACCEPT filename port offset, quoted filenames supported). DccEngine gains three

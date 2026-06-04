@@ -558,13 +558,14 @@ public sealed class DccEngineTests : IAsyncDisposable
         await Pub(new CtcpRequest(Server, "peer", "DCC",
             $"SEND small.bin 2130706433 5000 {fileContent.Length}"));
 
-        DccStarted? started = null;
-        _dispatcher.Subscribe<DccStarted>(e => started = e);
+        var startedTcs = new TaskCompletionSource<DccStarted>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.Subscribe<DccStarted>(e => startedTcs.TrySetResult(e));
 
         await _engine.AcceptReceiveAsync(offer!.Value.SessionId);
 
-        Assert.NotNull(started);
-        Assert.Equal(offer.Value.SessionId, started!.Value.SessionId);
+        DccStarted started = await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(offer.Value.SessionId, started.SessionId);
 
         Directory.Delete(tempDir, recursive: true);
     }
