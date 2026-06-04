@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- ServerListDialog (ui/dialogs/ServerList.cs): completed all per-entry fields. Added
+  username override, realname override, and a full SASL section (Mechanism ComboBox with
+  None/SCRAM-SHA-512/SCRAM-SHA-256/EXTERNAL/PLAIN, Account, and SASL Password fields).
+  Added Connect Commands multi-line TextBox (one command per line, stored as List<string>
+  in ServerEntry.ConnectCommands). Section labels group Connection, Identity, SASL, and
+  Behavior fields. Edit form wrapped in ScrollViewer so all fields are reachable at any
+  window height. Added Import and Export buttons (bottom-left) using Avalonia
+  StorageProvider file picker (JSON Files filter); export writes the current list,
+  import appends parsed entries. Errors are surfaced via a modal dialog. The Blank()
+  helper converts whitespace-only text to null for optional string fields.
+- ServerListExport (storage/config/ServerListExport.cs): new static class for server list
+  serialization. ExportToJson serializes to a versioned JSON envelope with
+  datajack_server_list_version, exported_at, and servers array; all ServerEntry fields
+  including passwords are written verbatim (credential encryption is a future phase
+  feature). ImportFromJson deserializes, assigns a fresh Guid to each entry to avoid ID
+  collisions, and coerces null auto_join/connect_commands to empty lists and blank
+  encoding to UTF-8. Throws JsonException on invalid JSON and InvalidDataException when
+  the servers array is absent.
+- 24 new export/import tests (tests/DataJack.Core.Tests/ServerListExportTests.cs):
+  structural checks (valid JSON, format version key, exported_at, servers array count),
+  field preservation (network name, port/TLS, plaintext password, null password, SASL
+  credentials, null SASL, auto-join, connect commands, encoding), multiple entries,
+  round-trip full-field fidelity, fresh-ID assignment, unique IDs across entries,
+  sanitization of null auto_join / null connect_commands / empty encoding, error paths
+  (invalid JSON throws JsonException, missing servers key throws InvalidDataException).
+
 - Alias system (core/irc/AliasManager.cs): AliasManager stores user-defined command
   aliases and expands them at dispatch time. Set(name, expansion) adds or replaces an
   alias; Remove(name) removes one; GetAll() returns a snapshot. TryExpand(commandLine)

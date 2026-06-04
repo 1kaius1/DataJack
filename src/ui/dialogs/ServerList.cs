@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ServerListDialog: basic address book for adding, editing, and deleting server entries.
-// Auto-connect entries are highlighted. See ARCHITECTURE.md §6.4 ServerListDialog.
+// ServerListDialog: complete server address book with SASL credentials, username/realname
+// overrides, connect commands, and JSON import/export. See ARCHITECTURE.md §6.4.
 
+using System.IO;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using DataJack.Core.Storage.Config;
 using DataJack.Ui.Themes;
 
@@ -14,22 +17,37 @@ namespace DataJack.Ui.Dialogs;
 /// <summary>
 /// Modal dialog that lets the user manage the server address book.
 /// Returns the updated list via <see cref="Result"/> after the user clicks Save.
+/// Provides JSON import and export for transferring entries between installations.
 /// </summary>
 public sealed class ServerListDialog : Window
 {
-    private readonly ConfigLoader _loader;
-    private readonly ThemeManager _theme;
-    private readonly ListBox      _listBox;
-    private readonly List<ServerEntry> _entries;
+    private static readonly string[] SaslMechanisms =
+        { "None", "SCRAM-SHA-512", "SCRAM-SHA-256", "EXTERNAL", "PLAIN" };
 
-    // Edit-panel controls
-    private readonly TextBox _txtNetwork;
-    private readonly TextBox _txtAddress;
-    private readonly TextBox _txtPort;
+    private readonly ConfigLoader   _loader;
+    private readonly List<ServerEntry> _entries;
+    private readonly ListBox        _listBox;
+
+    // Edit-panel controls — connection
+    private readonly TextBox  _txtNetwork;
+    private readonly TextBox  _txtAddress;
+    private readonly TextBox  _txtPort;
     private readonly CheckBox _chkTls;
-    private readonly TextBox _txtPassword;
+    private readonly TextBox  _txtPassword;
+
+    // Edit-panel controls — identity overrides
     private readonly TextBox _txtNick;
-    private readonly TextBox _txtAutoJoin;
+    private readonly TextBox _txtUsername;
+    private readonly TextBox _txtRealname;
+
+    // Edit-panel controls — SASL
+    private readonly ComboBox _cmbSaslMechanism;
+    private readonly TextBox  _txtSaslAccount;
+    private readonly TextBox  _txtSaslPassword;
+
+    // Edit-panel controls — behavior
+    private readonly TextBox  _txtAutoJoin;
+    private readonly TextBox  _txtConnectCommands;
     private readonly CheckBox _chkAutoConnect;
 
     private int _selectedIndex = -1;
@@ -37,19 +55,24 @@ public sealed class ServerListDialog : Window
     /// <summary>The saved server list after the dialog closes. Null if cancelled.</summary>
     public List<ServerEntry>? Result { get; private set; }
 
+    /// <summary>
+    /// Raised when the user clicks "Connect". Provides the selected server entry,
+    /// or null if no entry is selected.
+    /// </summary>
+    public event Action<ServerEntry?>? ConnectRequested;
+
     public ServerListDialog(ConfigLoader loader, ThemeManager theme)
     {
         _loader  = loader;
-        _theme   = theme;
         _entries = new List<ServerEntry>(loader.Config.Servers);
 
-        Title  = "Server List";
-        Width  = 700;
-        Height = 480;
+        Title     = "Server List";
+        Width     = 730;
+        Height    = 580;
         CanResize = true;
 
         // -----------------------------------------------------------------------
-        // Build layout: list on the left, edit form on the right
+        // Root grid: list panel left | edit panel right / button bar bottom
         // -----------------------------------------------------------------------
 
         var root = new Grid();
@@ -62,12 +85,6 @@ public sealed class ServerListDialog : Window
         var leftPanel = new DockPanel();
         Grid.SetColumn(leftPanel, 0);
         Grid.SetRow(leftPanel, 0);
-
-        _listBox = new ListBox { Margin = new Thickness(4) };
-        _listBox.SelectionChanged += OnSelectionChanged;
-        DockPanel.SetDock(_listBox, Dock.Top);
-        leftPanel.Children.Add(_listBox);
-        root.Children.Add(leftPanel);
 
         var listButtons = new StackPanel
         {
@@ -84,62 +101,126 @@ public sealed class ServerListDialog : Window
         DockPanel.SetDock(listButtons, Dock.Bottom);
         leftPanel.Children.Add(listButtons);
 
-        // ---- Right: edit form ----
-        var form = new StackPanel { Margin = new Thickness(8), Spacing = 6 };
+        _listBox = new ListBox { Margin = new Thickness(4) };
+        _listBox.SelectionChanged += OnSelectionChanged;
+        leftPanel.Children.Add(_listBox);
+
+        root.Children.Add(leftPanel);
+
+        // ---- Right: scrollable edit form ----
+        var form = new StackPanel { Margin = new Thickness(8, 4, 8, 4), Spacing = 5 };
         Grid.SetColumn(form, 1);
         Grid.SetRow(form, 0);
 
-        _txtNetwork   = AddFormRow(form, "Network name:", new TextBox());
-        _txtAddress   = AddFormRow(form, "Server address:", new TextBox());
-        _txtPort      = AddFormRow(form, "Port:", new TextBox { Text = "6697" });
-        _chkTls       = AddFormCheck(form, "Use TLS", true);
-        _txtPassword  = AddFormRow(form, "Password:", new TextBox { PasswordChar = '*' });
-        _txtNick      = AddFormRow(form, "Nick (override):", new TextBox());
-        _txtAutoJoin  = AddFormRow(form, "Auto-join channels (space-separated):", new TextBox());
-        _chkAutoConnect = AddFormCheck(form, "Auto-connect on launch", false);
+        // Connection
+        AddSectionLabel(form, "Connection");
+        _txtNetwork  = AddFormRow(form, "Network name:",    new TextBox());
+        _txtAddress  = AddFormRow(form, "Server address:",  new TextBox());
+        _txtPort     = AddFormRow(form, "Port:",            new TextBox { Text = "6697" });
+        _chkTls      = AddFormCheck(form, "Use TLS", defaultValue: true);
+        _txtPassword = AddFormRow(form, "Server password:", new TextBox { PasswordChar = '*' });
 
-        root.Children.Add(form);
+        // Identity overrides
+        AddSectionLabel(form, "Identity (override global settings)");
+        _txtNick      = AddFormRow(form, "Nick:",      new TextBox());
+        _txtUsername  = AddFormRow(form, "Username:",  new TextBox());
+        _txtRealname  = AddFormRow(form, "Realname:",  new TextBox());
 
-        // ---- Bottom: Save / Cancel buttons ----
-        var bottomBar = new StackPanel
+        // SASL
+        AddSectionLabel(form, "SASL Authentication");
+        _cmbSaslMechanism = AddFormRow(form, "Mechanism:", new ComboBox
         {
-            Orientation       = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin            = new Thickness(8),
-            Spacing           = 6,
+            ItemsSource    = SaslMechanisms,
+            SelectedIndex  = 0,
+            MinWidth       = 160,
+        });
+        _txtSaslAccount  = AddFormRow(form, "Account:",       new TextBox());
+        _txtSaslPassword = AddFormRow(form, "SASL password:", new TextBox { PasswordChar = '*' });
+
+        // Behavior
+        AddSectionLabel(form, "Behavior");
+        _txtAutoJoin = AddFormRow(form, "Auto-join (space-separated):", new TextBox());
+        _txtConnectCommands = AddFormRow(form, "Connect commands (one per line):", new TextBox
+        {
+            AcceptsReturn   = true,
+            Height          = 56,
+            TextWrapping    = TextWrapping.Wrap,
+            VerticalContentAlignment = VerticalAlignment.Top,
+        });
+        _chkAutoConnect = AddFormCheck(form, "Auto-connect on launch", defaultValue: false);
+
+        var scrollForm = new ScrollViewer
+        {
+            Content             = form,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
         };
+        Grid.SetColumn(scrollForm, 1);
+        Grid.SetRow(scrollForm, 0);
+        root.Children.Add(scrollForm);
+
+        // ---- Bottom button bar ----
+        var bottomBar = new DockPanel { Margin = new Thickness(8, 4) };
         Grid.SetColumnSpan(bottomBar, 2);
         Grid.SetRow(bottomBar, 1);
 
+        // Import / Export on the left
+        var leftButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        var btnImport = new Button { Content = "Import..." };
+        btnImport.Click += OnImportClick;
+        var btnExport = new Button { Content = "Export..." };
+        btnExport.Click += OnExportClick;
+        leftButtons.Children.Add(btnImport);
+        leftButtons.Children.Add(btnExport);
+        DockPanel.SetDock(leftButtons, Dock.Left);
+        bottomBar.Children.Add(leftButtons);
+
+        // Connect / Save / Cancel on the right
+        var rightButtons = new StackPanel
+        {
+            Orientation         = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing             = 4,
+        };
         var btnConnect = new Button { Content = "Connect" };
         btnConnect.Click += (_, _) => ConnectAndClose();
         var btnSave = new Button { Content = "Save" };
         btnSave.Click += (_, _) => SaveAndClose();
         var btnCancel = new Button { Content = "Cancel" };
         btnCancel.Click += (_, _) => Close();
+        rightButtons.Children.Add(btnConnect);
+        rightButtons.Children.Add(btnSave);
+        rightButtons.Children.Add(btnCancel);
+        bottomBar.Children.Add(rightButtons);
 
-        bottomBar.Children.Add(btnConnect);
-        bottomBar.Children.Add(btnSave);
-        bottomBar.Children.Add(btnCancel);
         root.Children.Add(bottomBar);
-
         Content = root;
 
         RefreshList();
     }
 
     // ---------------------------------------------------------------------------
-    // Form helpers
+    // Form layout helpers
     // ---------------------------------------------------------------------------
+
+    private static void AddSectionLabel(StackPanel form, string text)
+    {
+        form.Children.Add(new TextBlock
+        {
+            Text       = text,
+            FontWeight = FontWeight.SemiBold,
+            Margin     = new Thickness(0, 6, 0, 0),
+        });
+    }
 
     private static T AddFormRow<T>(StackPanel form, string label, T control) where T : Control
     {
-        var row = new DockPanel { Margin = new Thickness(0, 2) };
+        var row = new DockPanel { Margin = new Thickness(0, 1) };
         var lbl = new TextBlock
         {
-            Text  = label,
-            Width = 180,
-            VerticalAlignment = VerticalAlignment.Center,
+            Text              = label,
+            Width             = 200,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin            = new Thickness(0, 3, 6, 0),
         };
         DockPanel.SetDock(lbl, Dock.Left);
         row.Children.Add(lbl);
@@ -150,7 +231,7 @@ public sealed class ServerListDialog : Window
 
     private static CheckBox AddFormCheck(StackPanel form, string label, bool defaultValue)
     {
-        var cb = new CheckBox { Content = label, IsChecked = defaultValue };
+        var cb = new CheckBox { Content = label, IsChecked = defaultValue, Margin = new Thickness(0, 1) };
         form.Children.Add(cb);
         return cb;
     }
@@ -164,12 +245,11 @@ public sealed class ServerListDialog : Window
         _listBox.Items.Clear();
         foreach (var e in _entries)
         {
-            var item = new ListBoxItem
+            _listBox.Items.Add(new ListBoxItem
             {
                 Content = e.AutoConnect ? $"* {e.NetworkName}" : e.NetworkName,
                 Tag     = e,
-            };
-            _listBox.Items.Add(item);
+            });
         }
     }
 
@@ -179,44 +259,85 @@ public sealed class ServerListDialog : Window
         _selectedIndex = _listBox.SelectedIndex;
         if (_selectedIndex < 0 || _selectedIndex >= _entries.Count) return;
 
-        var entry = _entries[_selectedIndex];
-        _txtNetwork.Text      = entry.NetworkName;
-        _txtAddress.Text      = entry.Address;
-        _txtPort.Text         = entry.Port.ToString();
-        _chkTls.IsChecked     = entry.Tls;
-        _txtPassword.Text     = entry.Password ?? string.Empty;
-        _txtNick.Text         = entry.Nick ?? string.Empty;
-        _txtAutoJoin.Text     = string.Join(" ", entry.AutoJoinChannels);
-        _chkAutoConnect.IsChecked = entry.AutoConnect;
+        LoadEntry(_entries[_selectedIndex]);
+    }
+
+    private void LoadEntry(ServerEntry entry)
+    {
+        _txtNetwork.Text          = entry.NetworkName;
+        _txtAddress.Text          = entry.Address;
+        _txtPort.Text             = entry.Port.ToString();
+        _chkTls.IsChecked         = entry.Tls;
+        _txtPassword.Text         = entry.Password ?? string.Empty;
+        _txtNick.Text             = entry.Nick      ?? string.Empty;
+        _txtUsername.Text         = entry.Username  ?? string.Empty;
+        _txtRealname.Text         = entry.Realname  ?? string.Empty;
+
+        if (entry.Sasl is null)
+        {
+            _cmbSaslMechanism.SelectedIndex = 0; // "None"
+            _txtSaslAccount.Text            = string.Empty;
+            _txtSaslPassword.Text           = string.Empty;
+        }
+        else
+        {
+            int idx = Array.IndexOf(SaslMechanisms, entry.Sasl.Mechanism);
+            _cmbSaslMechanism.SelectedIndex = idx < 0 ? 0 : idx;
+            _txtSaslAccount.Text            = entry.Sasl.Account;
+            _txtSaslPassword.Text           = entry.Sasl.Password;
+        }
+
+        _txtAutoJoin.Text          = string.Join(" ", entry.AutoJoinChannels);
+        _txtConnectCommands.Text   = string.Join("\n", entry.ConnectCommands);
+        _chkAutoConnect.IsChecked  = entry.AutoConnect;
     }
 
     private void SaveCurrentEdits()
     {
         if (_selectedIndex < 0 || _selectedIndex >= _entries.Count) return;
 
-        var existing = _entries[_selectedIndex];
         if (!int.TryParse(_txtPort.Text, out int port)) port = 6697;
 
+        string? saslMechanism = _cmbSaslMechanism.SelectedItem is string s && s != "None" ? s : null;
+        SaslCredentials? sasl = saslMechanism is null ? null : new SaslCredentials(
+            Mechanism: saslMechanism,
+            Account:   _txtSaslAccount.Text?.Trim() ?? string.Empty,
+            Password:  _txtSaslPassword.Text ?? string.Empty);
+
+        var connectCommands = (_txtConnectCommands.Text ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        var existing = _entries[_selectedIndex];
         _entries[_selectedIndex] = existing with
         {
             NetworkName      = _txtNetwork.Text?.Trim() ?? existing.NetworkName,
             Address          = _txtAddress.Text?.Trim() ?? existing.Address,
             Port             = port,
             Tls              = _chkTls.IsChecked == true,
-            Password         = string.IsNullOrWhiteSpace(_txtPassword.Text) ? null : _txtPassword.Text,
-            Nick             = string.IsNullOrWhiteSpace(_txtNick.Text) ? null : _txtNick.Text,
+            Password         = Blank(_txtPassword.Text),
+            Nick             = Blank(_txtNick.Text),
+            Username         = Blank(_txtUsername.Text),
+            Realname         = Blank(_txtRealname.Text),
+            Sasl             = sasl,
             AutoJoinChannels = (_txtAutoJoin.Text ?? string.Empty)
                                 .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                                 .ToList(),
+            ConnectCommands  = connectCommands,
             AutoConnect      = _chkAutoConnect.IsChecked == true,
         };
     }
 
+    // Return null for whitespace-only text; strip surrounding whitespace otherwise.
+    private static string? Blank(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
     private void AddServer()
     {
         SaveCurrentEdits();
-        var entry = ServerEntry.New("New Network", "irc.example.com");
-        _entries.Add(entry);
+        _entries.Add(ServerEntry.New("New Network", "irc.example.com"));
         RefreshList();
         _listBox.SelectedIndex = _entries.Count - 1;
     }
@@ -227,6 +348,101 @@ public sealed class ServerListDialog : Window
         _entries.RemoveAt(_selectedIndex);
         _selectedIndex = -1;
         RefreshList();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Import / Export
+    // ---------------------------------------------------------------------------
+
+    private async void OnExportClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        SaveCurrentEdits();
+        try
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title             = "Export Server List",
+                SuggestedFileName = "datajack-servers.json",
+                FileTypeChoices   = new[] { new FilePickerFileType("JSON Files") { Patterns = new[] { "*.json" } } },
+            });
+            if (file is null) return;
+
+            string json = ServerListExport.ExportToJson(_entries);
+            await using var stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync($"Export failed: {ex.Message}");
+        }
+    }
+
+    private async void OnImportClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title          = "Import Server List",
+                AllowMultiple  = false,
+                FileTypeFilter = new[] { new FilePickerFileType("JSON Files") { Patterns = new[] { "*.json" } } },
+            });
+            if (files.Count == 0) return;
+
+            await using var stream = await files[0].OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            string json = await reader.ReadToEndAsync();
+
+            var imported = ServerListExport.ImportFromJson(json);
+            SaveCurrentEdits();
+            _entries.AddRange(imported);
+            RefreshList();
+        }
+        catch (JsonException ex)
+        {
+            await ShowErrorAsync($"Import failed — invalid JSON: {ex.Message}");
+        }
+        catch (InvalidDataException ex)
+        {
+            await ShowErrorAsync($"Import failed — {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync($"Import failed: {ex.Message}");
+        }
+    }
+
+    private async Task ShowErrorAsync(string message)
+    {
+        var dlg = new Window
+        {
+            Title                   = "Error",
+            Width                   = 420,
+            Height                  = 140,
+            WindowStartupLocation   = WindowStartupLocation.CenterOwner,
+            CanResize               = false,
+        };
+
+        var okBtn = new Button
+        {
+            Content             = "OK",
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin              = new Thickness(0, 10, 0, 0),
+        };
+        okBtn.Click += (_, _) => dlg.Close();
+
+        dlg.Content = new StackPanel
+        {
+            Margin   = new Thickness(16),
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                okBtn,
+            },
+        };
+
+        await dlg.ShowDialog(this);
     }
 
     // ---------------------------------------------------------------------------
@@ -244,13 +460,7 @@ public sealed class ServerListDialog : Window
     {
         SaveCurrentEdits();
         Result = new List<ServerEntry>(_entries);
-        // Signal the caller that a connection attempt was requested.
         ConnectRequested?.Invoke(_selectedIndex >= 0 ? _entries[_selectedIndex] : null);
         Close();
     }
-
-    /// <summary>
-    /// Raised when the user clicks "Connect". Provides the selected server entry.
-    /// </summary>
-    public event Action<ServerEntry?>? ConnectRequested;
 }

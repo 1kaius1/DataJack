@@ -123,7 +123,13 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   lookup; `AliasesChanged` event for config persistence; aliases stored in
   `AppConfig.Aliases` (schema v2); schema v2 migration adds empty aliases map
   to existing v1 configs.
-- [ ] `ServerListDialog`: complete — all fields (SASL credentials, auto-join, connect commands); import/export JSON
+- [x] `ServerListDialog`: complete — all fields exposed in the edit form (username
+  override, realname override, SASL mechanism/account/password, connect commands
+  one-per-line); scrollable edit panel; Import/Export JSON buttons using Avalonia
+  StorageProvider file picker. `ServerListExport` (storage/config/ServerListExport.cs)
+  handles serialization: exports to a versioned envelope (`datajack_server_list_version`,
+  `exported_at`, `servers[]`); import assigns fresh UUIDs to all entries and sanitizes
+  null list fields and blank encoding.
 - [ ] `NotificationService`: highlight and PM desktop notifications on all three platforms
   - Windows: WinRT `ToastNotificationManager`
   - macOS: `UNUserNotificationCenter`
