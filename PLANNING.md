@@ -130,10 +130,19 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   handles serialization: exports to a versioned envelope (`datajack_server_list_version`,
   `exported_at`, `servers[]`); import assigns fresh UUIDs to all entries and sanitizes
   null list fields and blank encoding.
-- [ ] `NotificationService`: highlight and PM desktop notifications on all three platforms
-  - Windows: WinRT `ToastNotificationManager`
-  - macOS: `UNUserNotificationCenter`
-  - Linux: `org.freedesktop.Notifications` D-Bus interface
+- [x] `NotificationService`: highlight and PM desktop notifications on all three platforms.
+  `INotificationService` / `NotificationInfo` / `NotificationKind` defined in
+  `platform/notifications/Service.cs`. `NotificationDispatcher` subscribes to
+  `MessageReceived` and `ActionReceived`; fires `PrivateMessage` notifications for
+  direct messages and `Highlight` notifications for channel messages/actions whose text
+  contains the current nick as a whole word (case-insensitive; bounded by non-alphanumeric,
+  non-underscore characters). `NullNotificationService` no-op for testing.
+  `NotificationServiceFactory` selects backend by OS at runtime.
+  - Linux: `LinuxNotificationService` (notify-send subprocess → org.freedesktop.Notifications)
+  - macOS: `MacosNotificationService` (osascript `display notification`; target is
+    `UNUserNotificationCenter` — native P/Invoke binding deferred pending code-signing)
+  - Windows: `WindowsNotificationService` (PowerShell WinRT script; target is WinRT
+    C# projection — deferred pending net10.0-windows retarget)
 - [ ] Highlight pattern matching: literal (case-insensitive), wildcard, regex; current nick always implicit
 - [ ] Log search: SQLite FTS5 index; `nick:`, `server:`, date range filters; paginated results
 - [ ] Log archive: compression (gzip/zstd); configurable rotation age; `ExportManager` (plain text and HTML)

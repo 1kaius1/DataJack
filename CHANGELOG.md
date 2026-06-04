@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- NotificationService (platform/notifications/): INotificationService interface with
+  IsSupported and NotifyAsync(NotificationInfo, CancellationToken). NotificationInfo
+  record carries Title, Body, and NotificationKind (Highlight, PrivateMessage, DccOffer,
+  WatchedNickOnline). NullNotificationService is the no-op implementation used in tests
+  and on unsupported platforms. NotificationServiceFactory.Create() selects
+  LinuxNotificationService, MacosNotificationService, or WindowsNotificationService at
+  runtime via RuntimeInformation.
+
+- NotificationDispatcher (platform/notifications/Service.cs): subscribes to
+  MessageReceived and ActionReceived on the event bus; reads the current nick from
+  IRCStateModel.CreateQuery() on each event. Fires PrivateMessage notifications for
+  non-channel PRIVMSGs and ACTIONs not sent by the local user. Fires Highlight
+  notifications for channel messages and actions whose text contains the current nick
+  as a whole word (ContainsNickAsWord: case-insensitive, bounded by non-alphanumeric /
+  non-underscore characters or string edges; returns false for empty nick; scans all
+  occurrences to handle repeated non-matching positions). Implements IDisposable to
+  unsubscribe from the bus on disposal.
+
+- LinuxNotificationService (platform/notifications/Linux.cs): [SupportedOSPlatform("linux")].
+  Spawns notify-send with title, body, --app-name=DataJack, --expire-time=5000, and a
+  freedesktop icon name chosen by NotificationKind. Uses ProcessStartInfo.ArgumentList
+  (no shell interpolation). Silently swallows all exceptions.
+
+- MacosNotificationService (platform/notifications/Macos.cs): [SupportedOSPlatform("macos")].
+  Spawns osascript -e "display notification..." with title and body escaped for AppleScript
+  double-quoted strings. Silently swallows all exceptions. Target API is
+  UNUserNotificationCenter; osascript is the Phase 3 vehicle pending code-signing.
+
+- WindowsNotificationService (platform/notifications/Windows.cs): [SupportedOSPlatform("windows")].
+  Spawns powershell.exe -NoProfile -NonInteractive with a WinRT script loading
+  Windows.UI.Notifications via ContentType=WindowsRuntime and showing a ToastText02 toast.
+  Silently swallows all exceptions. Target API is the WinRT C# projection; PowerShell is
+  the Phase 3 vehicle pending net10.0-windows retarget.
+
+- 28 new tests (tests/DataJack.Core.Tests/NotificationDispatcherTests.cs): 8 unit tests
+  for ContainsNickAsWord (empty nick, alone, start/end/middle with punctuation, embedded
+  in longer word, underscore-prefixed, case-insensitive); 20 dispatcher integration tests
+  (private message fires/kind/title/body/self-suppressed/multiple; channel highlight
+  fires/kind/title/body/case-insensitive/no-match/substring-only/self-suppressed; action
+  PM/channel-highlight/no-match/self-suppressed; no registered nick suppresses; unknown
+  server suppresses).
+
 - ServerListDialog (ui/dialogs/ServerList.cs): completed all per-entry fields. Added
   username override, realname override, and a full SASL section (Mechanism ComboBox with
   None/SCRAM-SHA-512/SCRAM-SHA-256/EXTERNAL/PLAIN, Account, and SASL Password fields).
