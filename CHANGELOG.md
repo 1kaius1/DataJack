@@ -8,6 +8,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- DCC SEND and DCC RECV (core/protocol/dcc/Engine.cs, Transfer.cs): full DCC file transfer
+  engine. DccEngine (one instance per server) subscribes to CtcpRequest events; when a
+  DCC SEND CTCP arrives it parses the offer, sanitizes the filename, and emits
+  DccOfferReceived for the UI to present to the user. AcceptReceiveAsync(sessionId)
+  connects to the peer, streams the file to the download directory, and emits DccStarted,
+  periodic DccProgress, and DccCompleted or DccFailed. InitiateSendAsync(connection, nick,
+  filePath) listens on a random port, sends the CTCP DCC SEND message, and waits for the
+  peer to connect in a background task before streaming the file and emitting the same
+  lifecycle events. Each session is tracked in DccEngine.Sessions as an immutable DccSession
+  snapshot (Id, Type, PeerNick, PeerAddress, PeerPort, Status, Filename, FileSize,
+  BytesTransferred, TransferRate, ErrorMessage).
+
+- DccFilenameSanitizer (core/protocol/dcc/Engine.cs): public static class, thread-safe.
+  Sanitize(filename): strips all directory components (both / and \, so Windows-style
+  traversal sequences like "..\..\" work correctly on all platforms) via Path.GetFileName
+  after normalizing backslashes to forward slashes; rejects filenames containing null
+  bytes; rejects bare "." and ".."; caps result at 255 characters; returns null when the
+  filename must be rejected entirely.
+  IsExecutable(filename): returns true when the file extension matches a set of 30+
+  extensions associated with executable code or scripts (.exe, .bat, .cmd, .sh, .bash,
+  .zsh, .fish, .ps1, .py, .rb, .pl, .lua, .js, .vbs, .jar, .app, .dmg, .deb, .rpm,
+  .run, .elf, and more); case-insensitive; returns false for null or empty input.
+  A true result should trigger an additional confirmation prompt in the UI.
+
+- DccCtcpParser (core/protocol/dcc/Engine.cs): internal static class; TryParse parses the
+  params string of a CtcpRequest whose Command is "DCC". Handles both bare filenames
+  (SEND file.txt ...) and quoted filenames with embedded spaces (SEND "my file.txt" ...).
+  IP address is parsed as a decimal uint32 in network byte order (big-endian) and converted
+  to dotted-decimal. A trailing passive-DCC token after the file size is silently ignored.
+  Returns false for null/empty params, unknown subcommands (CHAT, RESUME, ACCEPT), invalid
+  IP/port/size values, or missing required fields.
+
+- DCC file transfer I/O (core/protocol/dcc/Transfer.cs): DccReceiver.ReceiveAsync reads
+  data from the peer stream in 32 KB chunks, writes to the output file, and sends a 4-byte
+  big-endian ACK after each chunk carrying the running total bytes received (clamped to
+  uint.MaxValue for files >4 GB, consistent with all major DCC clients). DccSender.SendAsync
+  reads the file and streams it to the peer in 32 KB chunks while a background DrainAcksAsync
+  task drains 4-byte ACKs from the receiver to prevent TCP receive buffer overflow.
+
+- DCC event types (core/events/Types.cs): DccTransferType enum (Send, Receive, Chat);
+  DccSessionStatus enum (Pending, Active, Paused, Completed, Failed); DccOfferReceived
+  (carries Server, SessionId, PeerNick, Type, Filename, FileSize, PeerAddress, PeerPort,
+  IsExecutable); DccOfferSent; DccStarted; DccProgress (BytesTransferred, TransferRate);
+  DccCompleted (BytesTransferred); DccFailed (Reason); DccChatMessageReceived and
+  DccChatMessageSent (Phase 4 placeholders).
+
+- DccSettings (storage/config/Schema.cs): sealed record (DownloadDirectory string?,
+  AutoAccept bool, MaxFileSizeMb int); defaults: null directory (resolves to ~/Downloads),
+  auto-accept off, no size limit. Added as AppConfig.Dcc. Schema version bumped 4 -> 5;
+  MigrateToV5 in Loader.cs adds a default dcc object to existing v4 configs.
+
+- 67 new tests (tests/DataJack.Core.Tests/DccEngineTests.cs):
+  DccCtcpParserTests (15): valid SEND with bare filename; valid SEND with quoted filename
+  containing spaces; IP conversion for 127.0.0.1, 0.0.0.0, and 255.255.255.255; port 0
+  (passive DCC); trailing token ignored; false for null/empty/unknown subcommand/missing
+  port/missing size/oversized IP/invalid port/negative size; case-insensitive subcommand.
+  DccFilenameSanitizerTests (27): Sanitize preserves normal filenames and extensions;
+  strips Unix path traversal; strips Windows path traversal; strips absolute Unix path;
+  strips absolute Windows path; handles names at and over 255 chars; rejects null, empty,
+  null bytes, lone dot, double dot, and slash-only; IsExecutable returns true for 13
+  dangerous extensions (Theory), false for 6 safe extensions (Theory), case-insensitive
+  match, no extension returns false, null/empty returns false.
+  DccEngineTests (19): CtcpRequest -> DccOfferReceived emitted; offer fields (server, nick,
+  filename, size, address, port, type) are correct; session ID is non-empty Guid; two offers
+  have distinct session IDs; .exe file sets IsExecutable true; .jpg sets IsExecutable false;
+  path traversal filename is sanitized in offer; session stored with Pending status; events
+  from other server ignored; non-DCC CTCP ignored; unparseable DCC payload ignored;
+  AcceptReceiveAsync downloads correct bytes; AcceptReceiveAsync emits DccStarted;
+  AcceptReceiveAsync with unknown session ID throws; ResolveDownloadDirectory with explicit
+  path returns it; ResolveDownloadDirectory with null falls back to ~/Downloads.
+  DccReceiverTests (3): ReceiveAsync writes all bytes; ReceiveAsync stops at expectedSize
+  with a larger stream; ReceiveAsync reports progress.
+
+- 4 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsFive,
+  Default_Dcc_HasExpectedDefaults, Loader_MigratesV4ToV5_AddsDccSettings,
+  Loader_RoundTrip_PreservesDccSettings. Loader_MigratesV3ToV4_AddsArchiveSettings
+  updated to assert AppConfig.CurrentVersion (version-agnostic) rather than 4, and
+  now also asserts Dcc settings are present after the full migration chain.
+
 - Socks5Transport (net/Socks5.cs): implements INetworkProvider; tunnels connections through a
   SOCKS5 proxy. Constructor: Socks5Transport(proxyHost, proxyPort, username?, password?) and a
   ProxySettings-based overload. ConnectAsync(NetworkEndpoint, ct): connects to the proxy via

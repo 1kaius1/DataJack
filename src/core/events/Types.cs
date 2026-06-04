@@ -306,3 +306,79 @@ public readonly record struct PrivilegeError(string Server, string Command, stri
 
 /// <summary>A script handler invocation was dropped because the script queue was full.</summary>
 public readonly record struct ScriptInvocationDropped(string ScriptName, string EventType);
+
+// ---------------------------------------------------------------------------
+// DCC events — see ARCHITECTURE.md §11
+// ---------------------------------------------------------------------------
+
+/// <summary>Direction and type of a DCC session.</summary>
+public enum DccTransferType
+{
+    /// <summary>Outbound: we are sending the file.</summary>
+    Send,
+    /// <summary>Inbound: we are receiving the file.</summary>
+    Receive,
+    /// <summary>Direct client-to-client chat session (Phase 4).</summary>
+    Chat,
+}
+
+/// <summary>Lifecycle status of a DCC session.</summary>
+public enum DccSessionStatus
+{
+    /// <summary>Offer received or sent; awaiting user acceptance or peer connection.</summary>
+    Pending,
+    /// <summary>Transfer is in progress.</summary>
+    Active,
+    /// <summary>Transfer paused (resume is Phase 4).</summary>
+    Paused,
+    /// <summary>Transfer completed successfully.</summary>
+    Completed,
+    /// <summary>Transfer failed or was rejected.</summary>
+    Failed,
+}
+
+/// <summary>
+/// A DCC SEND offer arrived from a peer. The user must explicitly accept; no auto-accept
+/// occurs unless configured. <see cref="IsExecutable"/> is true when the filename has a
+/// potentially dangerous extension and warrants an additional confirmation prompt.
+/// </summary>
+public readonly record struct DccOfferReceived(
+    string          Server,
+    Guid            SessionId,
+    string          PeerNick,
+    DccTransferType Type,
+    string?         Filename,
+    long?           FileSize,
+    string          PeerAddress,
+    int             PeerPort,
+    bool            IsExecutable);
+
+/// <summary>We sent a DCC SEND offer to a peer and are waiting for them to connect.</summary>
+public readonly record struct DccOfferSent(
+    string          Server,
+    Guid            SessionId,
+    string          PeerNick,
+    DccTransferType Type,
+    string?         Filename);
+
+/// <summary>A DCC transfer connection was established and I/O has begun.</summary>
+public readonly record struct DccStarted(string Server, Guid SessionId);
+
+/// <summary>Periodic progress update emitted during an active DCC file transfer.</summary>
+public readonly record struct DccProgress(
+    string Server,
+    Guid   SessionId,
+    long   BytesTransferred,
+    double TransferRate);
+
+/// <summary>A DCC file transfer completed successfully.</summary>
+public readonly record struct DccCompleted(string Server, Guid SessionId, long BytesTransferred);
+
+/// <summary>A DCC transfer or offer failed or was rejected.</summary>
+public readonly record struct DccFailed(string Server, Guid SessionId, string Reason);
+
+/// <summary>A message arrived over a DCC CHAT connection (Phase 4).</summary>
+public readonly record struct DccChatMessageReceived(string Server, Guid SessionId, string Text);
+
+/// <summary>A message was sent over a DCC CHAT connection (Phase 4).</summary>
+public readonly record struct DccChatMessageSent(string Server, Guid SessionId, string Text);

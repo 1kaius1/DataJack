@@ -280,4 +280,9 @@ Behavioral rules are in `.clauderules`. Key reminders and C#-specific notes:
 
 See PLANNING.md for active goals, open questions, and pending decisions.
 
-Currently in: Phase 1 (IRC Core). Phase 0 complete: solution scaffolded, CI pipeline live, Paths, EventDispatcher, and IRCStateModel all implemented and tested.
+Currently in: Phase 3 (HexChat Feature Parity). Phases 0-2 complete. Phase 3 items
+completed: IRCParser phase-3 numerics, IRCv3 capability handlers, server-time, monitor,
+full IRCStateModel, full built-in command set, alias system, ServerListDialog,
+NotificationService, highlight pattern matching, log search, log archive, SOCKS5 proxy
+transport, DCC SEND/RECV. Phase 3 remaining: DCC RESUME, LayoutManager tree view,
+spell checking, away/idle management.

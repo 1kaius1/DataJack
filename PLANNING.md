@@ -203,7 +203,13 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   `ProxySettings` (storage/config/Schema.cs): sealed record (Host, Port, Username?, Password?);
   added as `ServerEntry.Proxy?` (nullable, `= null` default, no schema bump — missing JSON key
   deserializes as null). `ServerEntry.New()` updated to include `Proxy: null`.
-- [ ] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes); executable file type warnings; configurable download directory
+- [x] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes, Windows-
+  style `\` separator handled cross-platform); executable file type warning (30+ extensions);
+  configurable download directory (DccSettings, schema v5). DccEngine (one per server)
+  parses incoming CTCP DCC SEND offers via DccCtcpParser, sanitizes filenames via
+  DccFilenameSanitizer, emits DccOfferReceived, and provides AcceptReceiveAsync /
+  InitiateSendAsync. DccReceiver / DccSender handle the actual TCP I/O with 4-byte ACK
+  protocol. DccSession snapshot tracks per-session state.
 - [ ] DCC RESUME: transfer restart at byte offset
 - [ ] `LayoutManager`: tree view (mIRC-style server → channel hierarchy)
 - [ ] Spell checking: platform-specific backends

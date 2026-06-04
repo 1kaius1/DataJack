@@ -16,10 +16,11 @@ public sealed record AppConfig(
     [property: JsonPropertyName("advanced")]           AdvancedSettings           Advanced,
     [property: JsonPropertyName("aliases")]            Dictionary<string, string> Aliases,
     [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns,
-    [property: JsonPropertyName("archive")]            ArchiveSettings            Archive)
+    [property: JsonPropertyName("archive")]            ArchiveSettings            Archive,
+    [property: JsonPropertyName("dcc")]                DccSettings                Dcc)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -31,7 +32,8 @@ public sealed record AppConfig(
         Advanced:          AdvancedSettings.Default(),
         Aliases:           new Dictionary<string, string>(),
         HighlightPatterns: new List<HighlightPattern>(),
-        Archive:           ArchiveSettings.Default());
+        Archive:           ArchiveSettings.Default(),
+        Dcc:               DccSettings.Default());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>
@@ -156,6 +158,31 @@ public sealed record ArchiveSettings(
 {
     /// <summary>Default: enabled, archive files older than 90 days.</summary>
     internal static ArchiveSettings Default() => new(Enabled: true, MaxAgeDays: 90);
+}
+
+/// <summary>DCC file transfer configuration. See ARCHITECTURE.md §11.</summary>
+public sealed record DccSettings(
+    /// <summary>
+    /// Directory where received files are saved. When null the platform Downloads folder is used
+    /// (<c>~/Downloads</c> on Linux/macOS, <c>%USERPROFILE%\Downloads</c> on Windows).
+    /// </summary>
+    [property: JsonPropertyName("download_directory")] string? DownloadDirectory,
+    /// <summary>
+    /// When true, incoming DCC SEND offers are automatically accepted without prompting.
+    /// Off by default — incoming offers always require explicit user confirmation.
+    /// </summary>
+    [property: JsonPropertyName("auto_accept")]        bool    AutoAccept,
+    /// <summary>
+    /// Maximum size in megabytes of an auto-accepted file. 0 means no limit.
+    /// Only relevant when <see cref="AutoAccept"/> is true.
+    /// </summary>
+    [property: JsonPropertyName("max_file_size_mb")]   int     MaxFileSizeMb)
+{
+    /// <summary>Factory for safe default DCC settings: no auto-accept, platform download directory.</summary>
+    internal static DccSettings Default() => new(
+        DownloadDirectory: null,
+        AutoAccept:        false,
+        MaxFileSizeMb:     0);
 }
 
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>

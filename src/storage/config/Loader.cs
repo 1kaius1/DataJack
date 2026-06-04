@@ -106,6 +106,8 @@ public sealed class ConfigLoader
         3 => MigrateToV3(node),
         // v4 adds the "archive" object for log rotation and gzip compression settings.
         4 => MigrateToV4(node),
+        // v5 adds the "dcc" object for DCC file transfer configuration.
+        5 => MigrateToV5(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -139,6 +141,22 @@ public sealed class ConfigLoader
         }
 
         node["schema_version"] = 4;
+        return node;
+    }
+
+    private static JsonNode MigrateToV5(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj && obj["dcc"] is null)
+        {
+            obj["dcc"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["download_directory"] = null,
+                ["auto_accept"]        = false,
+                ["max_file_size_mb"]   = 0,
+            };
+        }
+
+        node["schema_version"] = 5;
         return node;
     }
 }
