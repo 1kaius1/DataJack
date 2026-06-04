@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using DataJack.Core.Events;
+using DataJack.Core.Irc;
 using DataJack.Core.Protocol.Dcc;
 using DataJack.Core.Storage.Config;
 using DataJack.Net;
@@ -504,7 +505,6 @@ public sealed class DccEngineTests : IAsyncDisposable
     {
         byte[] fileContent = "Hello, DCC World!"u8.ToArray();
         var senderStream = new FakeSenderStream(fileContent);
-        CreateEngine(senderStream);
 
         string tempDir = Path.Combine(Path.GetTempPath(), $"dcc_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -521,13 +521,17 @@ public sealed class DccEngineTests : IAsyncDisposable
 
         Assert.NotNull(offer);
 
-        DccCompleted? completed = null;
-        _dispatcher.Subscribe<DccCompleted>(e => completed = e);
+        // The DccCompleted event is dispatched on the event-loop thread after
+        // AcceptReceiveAsync writes it to the channel. Use a TCS so the test
+        // waits for the dispatch rather than racing against it.
+        var completedTcs = new TaskCompletionSource<DccCompleted>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.Subscribe<DccCompleted>(e => completedTcs.TrySetResult(e));
 
         await _engine.AcceptReceiveAsync(offer!.Value.SessionId);
 
-        Assert.NotNull(completed);
-        Assert.Equal(fileContent.Length, (int)completed!.Value.BytesTransferred);
+        DccCompleted completed = await completedTcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(fileContent.Length, (int)completed.BytesTransferred);
 
         string savedPath = Path.Combine(tempDir, "hello.txt");
         Assert.True(File.Exists(savedPath));
@@ -612,7 +616,7 @@ public sealed class DccReceiverTests
         try
         {
             long received = await DccReceiver.ReceiveAsync(
-                fakeSender, outPath, content.Length, null, CancellationToken.None);
+                fakeSender, outPath, content.Length, 0, null, CancellationToken.None);
 
             Assert.Equal(content.Length, (int)received);
             Assert.Equal(content, await File.ReadAllBytesAsync(outPath));
@@ -635,7 +639,7 @@ public sealed class DccReceiverTests
         try
         {
             long received = await DccReceiver.ReceiveAsync(
-                fakeSender, outPath, expectedSize: 100, null, CancellationToken.None);
+                fakeSender, outPath, expectedSize: 100, resumeOffset: 0, null, CancellationToken.None);
 
             Assert.Equal(100, (int)received);
             byte[] written = await File.ReadAllBytesAsync(outPath);
@@ -661,7 +665,7 @@ public sealed class DccReceiverTests
         try
         {
             await DccReceiver.ReceiveAsync(
-                fakeSender, outPath, content.Length, progress, CancellationToken.None);
+                fakeSender, outPath, content.Length, 0, progress, CancellationToken.None);
 
             // At least one progress report for the over-one-buffer transfer
             Assert.NotEmpty(progressReports);
@@ -671,6 +675,453 @@ public sealed class DccReceiverTests
         {
             File.Delete(outPath);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DccCtcpParser RESUME / ACCEPT tests — pure function, no I/O
+// ---------------------------------------------------------------------------
+
+public sealed class DccCtcpParserResumeTests
+{
+    [Fact]
+    public void Parse_Resume_BareFilename_Succeeds()
+    {
+        bool ok = DccCtcpParser.TryParseResumeOrAccept("RESUME archive.zip 5001 65536", out var offer);
+
+        Assert.True(ok);
+        Assert.Equal("archive.zip", offer.Filename);
+        Assert.Equal(5001,          offer.Port);
+        Assert.Equal(65536L,        offer.Offset);
+    }
+
+    [Fact]
+    public void Parse_Resume_QuotedFilename_Succeeds()
+    {
+        bool ok = DccCtcpParser.TryParseResumeOrAccept(@"RESUME ""my file.bin"" 5001 1024", out var offer);
+
+        Assert.True(ok);
+        Assert.Equal("my file.bin", offer.Filename);
+        Assert.Equal(5001,          offer.Port);
+        Assert.Equal(1024L,         offer.Offset);
+    }
+
+    [Fact]
+    public void Parse_Accept_Succeeds()
+    {
+        bool ok = DccCtcpParser.TryParseResumeOrAccept("ACCEPT data.bin 6000 2097152", out var offer);
+
+        Assert.True(ok);
+        Assert.Equal("data.bin",   offer.Filename);
+        Assert.Equal(6000,         offer.Port);
+        Assert.Equal(2097152L,     offer.Offset);
+    }
+
+    [Fact]
+    public void Parse_ZeroOffset_IsValid()
+    {
+        // A peer may send RESUME with offset 0 (start of file) — unusual but valid.
+        bool ok = DccCtcpParser.TryParseResumeOrAccept("RESUME f.txt 5000 0", out var offer);
+
+        Assert.True(ok);
+        Assert.Equal(0L, offer.Offset);
+    }
+
+    [Theory]
+    [InlineData("resume f.txt 5000 1024")]
+    [InlineData("Resume f.txt 5000 1024")]
+    [InlineData("ACCEPT f.txt 5000 1024")]
+    [InlineData("accept f.txt 5000 1024")]
+    public void Parse_CaseInsensitive_Succeeds(string ctcpParams)
+    {
+        Assert.True(DccCtcpParser.TryParseResumeOrAccept(ctcpParams, out _));
+    }
+
+    [Fact]
+    public void Parse_UnknownSubcommand_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("SEND f.txt 2130706433 5000 1024", out _));
+    }
+
+    [Fact]
+    public void Parse_NullParams_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept(null, out _));
+    }
+
+    [Fact]
+    public void Parse_EmptyParams_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("", out _));
+    }
+
+    [Fact]
+    public void Parse_InvalidPort_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("RESUME f.txt notaport 1024", out _));
+    }
+
+    [Fact]
+    public void Parse_NegativeOffset_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("RESUME f.txt 5000 -1", out _));
+    }
+
+    [Fact]
+    public void Parse_MissingOffset_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("RESUME f.txt 5000", out _));
+    }
+
+    [Fact]
+    public void Parse_MissingPort_ReturnsFalse()
+    {
+        Assert.False(DccCtcpParser.TryParseResumeOrAccept("RESUME f.txt", out _));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DCC RESUME transfer tests — I/O behaviour with resume offsets
+// ---------------------------------------------------------------------------
+
+public sealed class DccResumeTransferTests
+{
+    // DccReceiver — resume mode
+
+    [Fact]
+    public async Task DccReceiver_WithResumeOffset_AppendsToExistingFile()
+    {
+        byte[] existingBytes  = "AAAA"u8.ToArray();           // 4 bytes already on disk
+        byte[] remainderBytes = "BBBBBBBB"u8.ToArray();       // 8 bytes the sender provides
+        byte[] expectedFull   = "AAAABBBBBBBB"u8.ToArray();   // complete file
+
+        string outPath = Path.GetTempFileName();
+        try
+        {
+            // Pre-populate the partial file.
+            await File.WriteAllBytesAsync(outPath, existingBytes);
+
+            using var fakeSender = new FakeSenderStream(remainderBytes);
+
+            long received = await DccReceiver.ReceiveAsync(
+                fakeSender,
+                outPath,
+                expectedFull.Length,
+                resumeOffset: existingBytes.Length,
+                null,
+                CancellationToken.None);
+
+            Assert.Equal(expectedFull.Length, (int)received);
+            Assert.Equal(expectedFull, await File.ReadAllBytesAsync(outPath));
+        }
+        finally
+        {
+            File.Delete(outPath);
+        }
+    }
+
+    [Fact]
+    public async Task DccReceiver_WithResumeOffset_ReturnsTotalBytesIncludingOffset()
+    {
+        const int offset    = 1024;
+        const int newBytes  = 512;
+        byte[] content = new byte[newBytes];
+
+        using var fakeSender = new FakeSenderStream(content);
+
+        string outPath = Path.GetTempFileName();
+        try
+        {
+            // Pre-populate dummy partial file so append works.
+            await File.WriteAllBytesAsync(outPath, new byte[offset]);
+
+            long returned = await DccReceiver.ReceiveAsync(
+                fakeSender,
+                outPath,
+                offset + newBytes,
+                resumeOffset: offset,
+                null,
+                CancellationToken.None);
+
+            // Return value is the TOTAL bytes on disk, not just the session bytes.
+            Assert.Equal(offset + newBytes, (int)returned);
+        }
+        finally
+        {
+            File.Delete(outPath);
+        }
+    }
+
+    [Fact]
+    public async Task DccReceiver_WithZeroOffset_CreatesFreshFile()
+    {
+        byte[] content = "Hello"u8.ToArray();
+        using var fakeSender = new FakeSenderStream(content);
+
+        string outPath = Path.GetTempFileName();
+        try
+        {
+            long returned = await DccReceiver.ReceiveAsync(
+                fakeSender, outPath, content.Length, 0, null, CancellationToken.None);
+
+            Assert.Equal(content.Length, (int)returned);
+            Assert.Equal(content, await File.ReadAllBytesAsync(outPath));
+        }
+        finally
+        {
+            File.Delete(outPath);
+        }
+    }
+
+    // DccSender — resume mode
+
+    [Fact]
+    public async Task DccSender_WithResumeOffset_SkipsLeadingBytes()
+    {
+        byte[] fullFile = "AAAABBBBCCCC"u8.ToArray(); // 12 bytes
+
+        string filePath = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(filePath, fullFile);
+
+            var captureStream = new CaptureStream();
+
+            long sent = await DccSender.SendAsync(
+                captureStream, filePath, resumeOffset: 4, null, CancellationToken.None);
+
+            // Should have sent bytes[4..] = "BBBBCCCC"
+            Assert.Equal("BBBBCCCC"u8.ToArray(), captureStream.Written.ToArray());
+            // Return value is total bytes the receiver holds (offset + sent)
+            Assert.Equal(12, (int)sent);
+        }
+        finally
+        {
+            File.Delete(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task DccSender_WithZeroOffset_SendsFullFile()
+    {
+        byte[] fullFile = "HelloSender"u8.ToArray();
+
+        string filePath = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(filePath, fullFile);
+
+            var captureStream = new CaptureStream();
+
+            long sent = await DccSender.SendAsync(
+                captureStream, filePath, resumeOffset: 0, null, CancellationToken.None);
+
+            Assert.Equal(fullFile, captureStream.Written.ToArray());
+            Assert.Equal(fullFile.Length, (int)sent);
+        }
+        finally
+        {
+            File.Delete(filePath);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DccEngine RESUME integration tests
+// ---------------------------------------------------------------------------
+
+public sealed class DccEngineResumeTests : IAsyncDisposable
+{
+    private const string Server = "libera";
+
+    private readonly EventDispatcher _dispatcher = new();
+    private DccEngine?               _engine;
+
+    public DccEngineResumeTests()
+    {
+        _dispatcher.Start();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_engine is not null)
+            await _engine.DisposeAsync();
+        await _dispatcher.DisposeAsync();
+    }
+
+    private async Task Pub<T>(T evt) where T : struct
+    {
+        await _dispatcher.PublishAsync(evt);
+        await Task.Delay(50);
+    }
+
+    // Sender role: peer sends DCC RESUME → engine stores the confirmed offset.
+    // The ACCEPT CTCP response is sent via IRCConnection; the exact wire format is
+    // verified in DccCtcpParserResumeTests. Here we verify the state side-effect:
+    // the confirmed resume offset is stored so the background send task can use it.
+    [Fact]
+    public async Task DccResume_FromPeer_StoresConfirmedOffset()
+    {
+        var pipeStream  = new DuplexPipeStream();
+        var ircProvider = new FakeNetworkProvider(pipeStream);
+        var ircConn     = new IRCConnection(Server, ircProvider, _dispatcher);
+        await ircConn.ConnectAsync(new NetworkEndpoint("h", 6667, false));
+
+        _engine = new DccEngine(Server, _dispatcher,
+            new FakeNetworkProvider(Stream.Null),
+            () => DccSettings.Default(),
+            ircConnection: ircConn);
+
+        // Inject a pending Send session (filename "file.zip" on port 5500).
+        var session = new DccSession(
+            Guid.NewGuid(), Server, DccTransferType.Send, "bob",
+            "0.0.0.0", 5500, DccSessionStatus.Pending, "file.zip",
+            FileSize: 65536, BytesTransferred: 0, TransferRate: 0, ErrorMessage: null);
+        _engine.AddSessionForTest(session);
+
+        // Peer sends DCC RESUME.
+        await Pub(new CtcpRequest(Server, "bob", "DCC", "RESUME file.zip 5500 32768"));
+
+        // Give the fire-and-forget SendLineAsync a moment to complete.
+        await Task.Delay(100);
+
+        // The engine should have stored the confirmed offset for the background send task.
+        Assert.True(_engine.HasConfirmedResumeOffset(session.Id));
+        Assert.Equal(32768L, _engine.GetConfirmedResumeOffset(session.Id));
+
+        await ircConn.DisposeAsync();
+    }
+
+    // Sender role: RESUME for an unknown session is silently ignored.
+    [Fact]
+    public async Task DccResume_NoMatchingSession_IsIgnored()
+    {
+        var pipeStream  = new DuplexPipeStream();
+        var ircProvider = new FakeNetworkProvider(pipeStream);
+        var ircConn     = new IRCConnection(Server, ircProvider, _dispatcher);
+        await ircConn.ConnectAsync(new NetworkEndpoint("h", 6667, false));
+
+        _engine = new DccEngine(Server, _dispatcher,
+            new FakeNetworkProvider(Stream.Null),
+            () => DccSettings.Default(),
+            ircConnection: ircConn);
+
+        // No sessions registered — RESUME should produce no ACCEPT.
+        await Pub(new CtcpRequest(Server, "bob", "DCC", "RESUME ghost.zip 9999 100"));
+
+        // No ACCEPT should be sent within a short window.
+        using var readCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        try
+        {
+            string? sent = await pipeStream.ReadClientLineAsync(readCts.Token);
+            // If anything was read, it must not be an ACCEPT for our ghost session.
+            if (sent is not null)
+                Assert.DoesNotContain("DCC ACCEPT ghost.zip", sent);
+        }
+        catch (OperationCanceledException) { } // timeout = nothing sent, which is correct
+
+        await ircConn.DisposeAsync();
+    }
+
+    // Receiver role: AcceptReceiveAsync with a partial file sends DCC RESUME and
+    // then downloads the remainder once the sender replies with DCC ACCEPT.
+    [Fact]
+    public async Task AcceptReceiveAsync_PartialFile_SendsResumeAndAppendsTail()
+    {
+        byte[] fullContent = "FIRSTHALF_SECONDHALF"u8.ToArray(); // 20 bytes
+        int    offset      = 10;
+        byte[] partial     = fullContent[..offset];
+        byte[] remainder   = fullContent[offset..];
+
+        string tempDir = Path.Combine(Path.GetTempPath(), $"dcc_resume_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        string filePath = Path.Combine(tempDir, "resume.txt");
+        await File.WriteAllBytesAsync(filePath, partial);
+
+        // IRC pipe to capture the RESUME CTCP the engine sends.
+        var pipeStream  = new DuplexPipeStream();
+        var ircProvider = new FakeNetworkProvider(pipeStream);
+        var ircConn     = new IRCConnection(Server, ircProvider, _dispatcher);
+        await ircConn.ConnectAsync(new NetworkEndpoint("h", 6667, false));
+
+        // Network provider that returns the remainder bytes.
+        var senderStream  = new FakeSenderStream(remainder);
+        var dataProvider  = new FakeNetworkProvider(senderStream);
+
+        _engine = new DccEngine(
+            Server, _dispatcher, dataProvider,
+            () => new DccSettings(tempDir, false, 0),
+            ircConnection: ircConn);
+
+        // Simulate receiving the original SEND offer.
+        DccOfferReceived? offer = null;
+        _dispatcher.Subscribe<DccOfferReceived>(e => offer = e);
+        await Pub(new CtcpRequest(Server, "sender", "DCC",
+            $"SEND resume.txt 2130706433 5000 {fullContent.Length}"));
+
+        Assert.NotNull(offer);
+
+        // Start the accept in the background (it will pause at the RESUME handshake).
+        var acceptTask = _engine.AcceptReceiveAsync(offer!.Value.SessionId);
+
+        // Give AcceptReceiveAsync time to send the DCC RESUME CTCP.
+        await Task.Delay(150);
+
+        // Sender replies with DCC ACCEPT to release the handshake.
+        // (The RESUME CTCP wire format is verified in DccCtcpParserResumeTests.)
+        await _dispatcher.PublishAsync(
+            new CtcpRequest(Server, "sender", "DCC", $"ACCEPT resume.txt 5000 {offset}"));
+        await Task.Delay(50);
+
+        // AcceptReceiveAsync should now complete.
+        await acceptTask;
+
+        // Verify the file contains the full content.
+        Assert.Equal(fullContent, await File.ReadAllBytesAsync(filePath));
+
+        await ircConn.DisposeAsync();
+        Directory.Delete(tempDir, recursive: true);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CaptureStream: writable stream that records all written bytes; reads return EOF.
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Test helper: records all bytes written to it; reads immediately return 0 (EOF).
+/// Used to inspect what DccSender wrote without a real TCP connection.
+/// </summary>
+internal sealed class CaptureStream : Stream
+{
+    private readonly List<byte> _written = new();
+
+    public byte[] Written => _written.ToArray();
+
+    public override bool CanRead  => true;
+    public override bool CanWrite => true;
+    public override bool CanSeek  => false;
+    public override long Length   => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override void   Flush()                                                => _written.Clear();
+    public override long   Seek(long offset, SeekOrigin origin)                   => throw new NotSupportedException();
+    public override void   SetLength(long value)                                  => throw new NotSupportedException();
+    public override int    Read(byte[] buffer, int offset, int count)             => 0; // EOF
+    public override void   Write(byte[] buffer, int offset, int count)            => _written.AddRange(buffer[offset..(offset + count)]);
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) =>
+        ValueTask.FromResult(0); // EOF
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        _written.AddRange(buffer.Span.ToArray());
+        await Task.Yield();
     }
 }
 

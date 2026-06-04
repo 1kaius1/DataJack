@@ -128,8 +128,17 @@ internal readonly record struct DccOffer(
     long   FileSize);
 
 /// <summary>
+/// Parsed parameter data from a DCC RESUME or DCC ACCEPT CTCP message.
+/// Both messages share the same three-field structure: filename, port, offset.
+/// </summary>
+internal readonly record struct DccResumeOffer(
+    string Filename,
+    int    Port,
+    long   Offset);
+
+/// <summary>
 /// Parses the parameter string of a DCC CTCP message.
-/// Only the SEND subcommand is handled; CHAT, RESUME, and ACCEPT are Phase 4.
+/// Phase 3 handles SEND, RESUME, and ACCEPT. CHAT is Phase 4.
 /// </summary>
 internal static class DccCtcpParser
 {
@@ -222,6 +231,70 @@ internal static class DccCtcpParser
         offer = new DccOffer(filename, peerAddress, port, fileSize);
         return true;
     }
+
+    /// <summary>
+    /// Attempts to parse a DCC RESUME or DCC ACCEPT CTCP message.
+    /// Both share the same structure: <c>RESUME|ACCEPT filename port offset</c>
+    /// (quoted filenames are also supported). The caller is expected to have already
+    /// determined whether this is RESUME or ACCEPT by inspecting the first token.
+    /// Returns <see langword="false"/> for null/empty params, invalid values, or any
+    /// subcommand other than RESUME/ACCEPT.
+    /// </summary>
+    internal static bool TryParseResumeOrAccept(string? ctcpParams, out DccResumeOffer offer)
+    {
+        offer = default;
+        if (string.IsNullOrEmpty(ctcpParams))
+            return false;
+
+        var span = ctcpParams.AsSpan().TrimStart();
+
+        // Read and validate the subcommand.
+        int spaceIdx = span.IndexOf(' ');
+        if (spaceIdx < 0)
+            return false;
+
+        var subcommand = span[..spaceIdx];
+        if (!subcommand.Equals("RESUME", StringComparison.OrdinalIgnoreCase) &&
+            !subcommand.Equals("ACCEPT", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        span = span[(spaceIdx + 1)..].TrimStart();
+
+        // Parse filename — quoted or bare.
+        string filename;
+        if (!span.IsEmpty && span[0] == '"')
+        {
+            int closeQuote = span[1..].IndexOf('"');
+            if (closeQuote < 0)
+                return false;
+            filename = span[1..(closeQuote + 1)].ToString();
+            span = span[(closeQuote + 2)..].TrimStart();
+        }
+        else
+        {
+            int nameEnd = span.IndexOf(' ');
+            if (nameEnd < 0)
+                return false;
+            filename = span[..nameEnd].ToString();
+            span = span[(nameEnd + 1)..].TrimStart();
+        }
+
+        // Parse port.
+        int portEnd = span.IndexOf(' ');
+        if (portEnd < 0)
+            return false;
+
+        if (!int.TryParse(span[..portEnd], out int port) || port < 0 || port > 65535)
+            return false;
+        span = span[(portEnd + 1)..].TrimStart();
+
+        // Parse offset (remaining span; no trailing fields in the RESUME/ACCEPT format).
+        if (!long.TryParse(span, out long offset) || offset < 0)
+            return false;
+
+        offer = new DccResumeOffer(filename, port, offset);
+        return true;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,15 +313,22 @@ internal static class DccCtcpParser
 /// </summary>
 public sealed class DccEngine : IAsyncDisposable
 {
-    private readonly string           _serverId;
-    private readonly EventDispatcher  _dispatcher;
-    private readonly INetworkProvider _networkProvider;
+    private readonly string            _serverId;
+    private readonly EventDispatcher   _dispatcher;
+    private readonly INetworkProvider  _networkProvider;
     private readonly Func<DccSettings> _settingsGetter;
+    // Used to send DCC RESUME (receiver role) and DCC ACCEPT (sender role) over IRC.
+    private readonly IRCConnection?    _ircConnection;
     // Overridable in tests to avoid binding real OS ports.
     private readonly Func<int, TcpListener>? _listenerFactory;
 
     private readonly ConcurrentDictionary<Guid, DccSession> _sessions = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeCts = new();
+    // RESUME correlation (receiver role): (filename, port) → TCS completed with confirmed offset.
+    private readonly ConcurrentDictionary<(string, int), TaskCompletionSource<long>> _pendingResumes = new();
+    // Confirmed resume offsets (sender role): sessionId → offset the peer requested.
+    // Consumed once by the background send task when the peer's TCP connection arrives.
+    private readonly ConcurrentDictionary<Guid, long> _confirmedResumeOffsets = new();
     private bool _disposed;
 
     // The synchronous event handler reference is kept so it can be passed to Unsubscribe.
@@ -264,6 +344,11 @@ public sealed class DccEngine : IAsyncDisposable
     /// Delegate invoked on each transfer to retrieve current DCC configuration, allowing
     /// config changes to take effect without restarting the engine.
     /// </param>
+    /// <param name="ircConnection">
+    /// Optional IRC connection used to send DCC RESUME (when we are the receiver) and
+    /// DCC ACCEPT (when we are the sender). When <see langword="null"/> the resume
+    /// handshake is skipped and transfers always restart from the beginning.
+    /// </param>
     /// <param name="listenerFactory">
     /// Optional: returns a <see cref="TcpListener"/> bound to the requested local port.
     /// Pass <see langword="null"/> (default) to use <see cref="TcpListener"/> directly.
@@ -274,6 +359,7 @@ public sealed class DccEngine : IAsyncDisposable
         EventDispatcher    dispatcher,
         INetworkProvider   networkProvider,
         Func<DccSettings>  settingsGetter,
+        IRCConnection?     ircConnection   = null,
         Func<int, TcpListener>? listenerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(serverId);
@@ -285,6 +371,7 @@ public sealed class DccEngine : IAsyncDisposable
         _dispatcher      = dispatcher;
         _networkProvider = networkProvider;
         _settingsGetter  = settingsGetter;
+        _ircConnection   = ircConnection;
         _listenerFactory = listenerFactory;
         _ctcpHandler     = OnCtcpRequest;
 
@@ -292,7 +379,21 @@ public sealed class DccEngine : IAsyncDisposable
     }
 
     // ---------------------------------------------------------------------------
-    // Incoming offer handling — runs on the event dispatch thread (synchronous)
+    // Test helper — allows tests to inject pre-built sessions without a real handshake.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>Adds a session directly into the session table. For unit tests only.</summary>
+    internal void AddSessionForTest(DccSession session) => _sessions[session.Id] = session;
+
+    /// <summary>Returns true when a confirmed resume offset exists for the given session. For unit tests only.</summary>
+    internal bool HasConfirmedResumeOffset(Guid sessionId) => _confirmedResumeOffsets.ContainsKey(sessionId);
+
+    /// <summary>Returns the confirmed resume offset for the given session, or 0 if absent. For unit tests only.</summary>
+    internal long GetConfirmedResumeOffset(Guid sessionId) =>
+        _confirmedResumeOffsets.TryGetValue(sessionId, out long v) ? v : 0;
+
+    // ---------------------------------------------------------------------------
+    // Incoming CTCP dispatch — runs on the event dispatch thread (synchronous)
     // ---------------------------------------------------------------------------
 
     private void OnCtcpRequest(CtcpRequest req)
@@ -303,9 +404,35 @@ public sealed class DccEngine : IAsyncDisposable
         if (!req.Command.Equals("DCC", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!DccCtcpParser.TryParse(req.Params, out DccOffer offer))
+        // Peek at the DCC subcommand to route to the right handler.
+        var paramSpan = (req.Params ?? string.Empty).AsSpan().TrimStart();
+        int firstSpace = paramSpan.IndexOf(' ');
+        if (firstSpace < 0)
             return;
 
+        var sub = paramSpan[..firstSpace];
+
+        if (sub.Equals("SEND", StringComparison.OrdinalIgnoreCase))
+        {
+            if (DccCtcpParser.TryParse(req.Params, out DccOffer offer))
+                HandleSendOffer(req, offer);
+        }
+        else if (sub.Equals("RESUME", StringComparison.OrdinalIgnoreCase))
+        {
+            // Peer wants to resume a file we are sending (we are in the sender role).
+            if (DccCtcpParser.TryParseResumeOrAccept(req.Params, out DccResumeOffer resumeOffer))
+                HandleResumeFromPeer(req.FromNick, resumeOffer);
+        }
+        else if (sub.Equals("ACCEPT", StringComparison.OrdinalIgnoreCase))
+        {
+            // Sender confirmed our RESUME request (we are in the receiver role).
+            if (DccCtcpParser.TryParseResumeOrAccept(req.Params, out DccResumeOffer acceptOffer))
+                HandleAcceptFromPeer(acceptOffer);
+        }
+    }
+
+    private void HandleSendOffer(CtcpRequest req, DccOffer offer)
+    {
         string? safeFilename = DccFilenameSanitizer.Sanitize(offer.Filename);
         bool isExec = safeFilename is not null && DccFilenameSanitizer.IsExecutable(safeFilename);
 
@@ -326,18 +453,60 @@ public sealed class DccEngine : IAsyncDisposable
         _sessions[session.Id] = session;
 
         _ = _dispatcher.PublishAsync(new DccOfferReceived(
-            Server:      _serverId,
-            SessionId:   session.Id,
-            PeerNick:    req.FromNick,
-            Type:        DccTransferType.Receive,
-            Filename:    safeFilename,
-            FileSize:    offer.FileSize,
-            PeerAddress: offer.PeerAddress,
-            PeerPort:    offer.PeerPort,
+            Server:       _serverId,
+            SessionId:    session.Id,
+            PeerNick:     req.FromNick,
+            Type:         DccTransferType.Receive,
+            Filename:     safeFilename,
+            FileSize:     offer.FileSize,
+            PeerAddress:  offer.PeerAddress,
+            PeerPort:     offer.PeerPort,
             IsExecutable: isExec)).AsTask()
             .ContinueWith(
                 static t => { /* publishing errors are silently swallowed */ },
                 TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    // Sender role: peer sent DCC RESUME → reply with DCC ACCEPT and store the offset.
+    private void HandleResumeFromPeer(string fromNick, DccResumeOffer offer)
+    {
+        if (_ircConnection is null)
+            return;
+
+        // Find a Pending Send session that matches the filename and port.
+        DccSession? match = null;
+        foreach (var s in _sessions.Values)
+        {
+            if (s.Type == DccTransferType.Send &&
+                s.Status == DccSessionStatus.Pending &&
+                string.Equals(s.Filename, offer.Filename, StringComparison.OrdinalIgnoreCase) &&
+                s.PeerPort == offer.Port)
+            {
+                match = s;
+                break;
+            }
+        }
+
+        if (match is null)
+            return;
+
+        // Store the confirmed offset; the background send task will consume it.
+        _confirmedResumeOffsets[match.Id] = offer.Offset;
+
+        // Send DCC ACCEPT to the receiver.
+        string acceptCtcp = $"\x01DCC ACCEPT {offer.Filename} {offer.Port} {offer.Offset}\x01";
+        _ = _ircConnection.SendLineAsync($"PRIVMSG {fromNick} :{acceptCtcp}")
+            .ContinueWith(
+                static t => { /* send errors swallowed; IRC connection handles reconnect */ },
+                TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    // Receiver role: sender replied with DCC ACCEPT → complete the pending TCS.
+    private void HandleAcceptFromPeer(DccResumeOffer offer)
+    {
+        var key = (offer.Filename, offer.Port);
+        if (_pendingResumes.TryRemove(key, out var tcs))
+            tcs.TrySetResult(offer.Offset);
     }
 
     // ---------------------------------------------------------------------------
@@ -380,14 +549,51 @@ public sealed class DccEngine : IAsyncDisposable
 
         try
         {
-            var endpoint = new NetworkEndpoint(session.PeerAddress, session.PeerPort, UseTls: false);
-            await using var peerStream = await _networkProvider
-                .ConnectAsync(endpoint, cts.Token).ConfigureAwait(false);
-
             var settings = _settingsGetter();
             string downloadDir = ResolveDownloadDirectory(settings);
             Directory.CreateDirectory(downloadDir);
             string outputPath = Path.Combine(downloadDir, session.Filename);
+
+            // --- DCC RESUME handshake ---
+            // If a partial file already exists and is smaller than the total, attempt
+            // to resume from where it left off rather than restarting from the beginning.
+            long resumeOffset = 0;
+            if (_ircConnection is not null && File.Exists(outputPath))
+            {
+                var existing = new FileInfo(outputPath);
+                long partialSize = existing.Length;
+                long totalSize   = session.FileSize ?? 0;
+                if (partialSize > 0 && partialSize < totalSize)
+                {
+                    // Register the correlation entry so HandleAcceptFromPeer can complete it.
+                    var tcs = new TaskCompletionSource<long>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    _pendingResumes[(session.Filename, session.PeerPort)] = tcs;
+
+                    string resumeCtcp = $"\x01DCC RESUME {session.Filename} {session.PeerPort} {partialSize}\x01";
+                    await _ircConnection
+                        .SendLineAsync($"PRIVMSG {session.PeerNick} :{resumeCtcp}", cts.Token)
+                        .ConfigureAwait(false);
+
+                    // Wait up to 30 s for the sender's DCC ACCEPT reply.
+                    try
+                    {
+                        using var resumeCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                        resumeCts.CancelAfter(TimeSpan.FromSeconds(30));
+                        resumeOffset = await tcs.Task.WaitAsync(resumeCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _pendingResumes.TryRemove((session.Filename, session.PeerPort), out _);
+                        resumeOffset = 0; // fall back to fresh download on timeout
+                    }
+                }
+            }
+            // --- end RESUME handshake ---
+
+            var endpoint = new NetworkEndpoint(session.PeerAddress, session.PeerPort, UseTls: false);
+            await using var peerStream = await _networkProvider
+                .ConnectAsync(endpoint, cts.Token).ConfigureAwait(false);
 
             var progress = new Progress<(long bytes, double rate)>(update =>
             {
@@ -404,6 +610,7 @@ public sealed class DccEngine : IAsyncDisposable
                 peerStream,
                 outputPath,
                 session.FileSize ?? long.MaxValue,
+                resumeOffset,
                 progress,
                 cts.Token).ConfigureAwait(false);
 
@@ -508,6 +715,9 @@ public sealed class DccEngine : IAsyncDisposable
                 _sessions[session.Id] = _sessions[session.Id] with { Status = DccSessionStatus.Active };
                 await _dispatcher.PublishAsync(new DccStarted(_serverId, session.Id)).ConfigureAwait(false);
 
+                // Consume the resume offset stored by HandleResumeFromPeer (0 if no resume).
+                _confirmedResumeOffsets.TryRemove(session.Id, out long resumeOffset);
+
                 var progress = new Progress<(long bytes, double rate)>(update =>
                 {
                     _sessions[session.Id] = _sessions[session.Id] with
@@ -520,7 +730,7 @@ public sealed class DccEngine : IAsyncDisposable
                 });
 
                 await using var peerStream = tcpClient.GetStream();
-                long sent = await DccSender.SendAsync(peerStream, filePath, progress, cts.Token)
+                long sent = await DccSender.SendAsync(peerStream, filePath, resumeOffset, progress, cts.Token)
                     .ConfigureAwait(false);
 
                 _sessions[session.Id] = _sessions[session.Id] with

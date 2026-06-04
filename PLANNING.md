@@ -210,7 +210,13 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   DccFilenameSanitizer, emits DccOfferReceived, and provides AcceptReceiveAsync /
   InitiateSendAsync. DccReceiver / DccSender handle the actual TCP I/O with 4-byte ACK
   protocol. DccSession snapshot tracks per-session state.
-- [ ] DCC RESUME: transfer restart at byte offset
+- [x] DCC RESUME: transfer restart at byte offset. DccCtcpParser.TryParseResumeOrAccept
+  parses both RESUME and ACCEPT CTCP messages (same structure: filename port offset).
+  Receiver role: AcceptReceiveAsync detects a partial file, sends DCC RESUME via
+  IRCConnection, awaits DCC ACCEPT (30 s timeout, falls back to fresh download), then
+  resumes from the confirmed offset using DccReceiver with append mode.
+  Sender role: incoming DCC RESUME CTCP stores the offset in _confirmedResumeOffsets
+  and replies DCC ACCEPT; background send task seeks to offset via DccSender.
 - [ ] `LayoutManager`: tree view (mIRC-style server → channel hierarchy)
 - [ ] Spell checking: platform-specific backends
   - Windows: WinRT spell check API

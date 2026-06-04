@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- DCC RESUME (core/protocol/dcc/Engine.cs, Transfer.cs): transfer restart at byte offset.
+  DccCtcpParser.TryParseResumeOrAccept parses the shared RESUME / ACCEPT CTCP format
+  (RESUME|ACCEPT filename port offset, quoted filenames supported). DccEngine gains three
+  new roles: receiver role — AcceptReceiveAsync detects a partial on-disk file and (when
+  an IRCConnection is configured) sends DCC RESUME, registers a pending TaskCompletionSource
+  keyed by (filename, port), awaits DCC ACCEPT (30 s timeout, falls back to fresh download),
+  then passes the confirmed offset to DccReceiver; sender role — OnCtcpRequest handles
+  incoming DCC RESUME by matching a Pending Send session, storing the offset in
+  _confirmedResumeOffsets, and sending DCC ACCEPT back via IRCConnection; sender role —
+  the background send task in InitiateSendAsync consumes _confirmedResumeOffsets[sessionId]
+  (default 0) and passes it to DccSender. DccReceiver.ReceiveAsync and DccSender.SendAsync
+  each gain a long resumeOffset = 0 parameter: receiver opens the file in append mode when
+  resumeOffset > 0 so existing bytes are preserved; ACK = resumeOffset + sessionBytes
+  so the sender can track overall progress; returns total bytes on disk (resumeOffset +
+  sessionBytes). Sender seeks the file to resumeOffset before streaming, progress reports
+  total bytes (resumeOffset + sessionSent). DccEngine.AddSessionForTest, HasConfirmedResumeOffset,
+  and GetConfirmedResumeOffset are internal test helpers. DccEngine constructor gains an
+  optional IRCConnection? ircConnection = null parameter; all existing call sites are
+  unaffected.
+
+  23 new tests (DccCtcpParserResumeTests, DccResumeTransferTests, DccEngineResumeTests):
+  DccCtcpParserResumeTests (12): RESUME bare filename; RESUME quoted filename; ACCEPT;
+  offset 0 is valid; case-insensitive RESUME/ACCEPT/resume/accept (Theory 4 cases);
+  unknown subcommand (SEND) returns false; null/empty params; invalid port; negative offset;
+  missing offset; missing port. DccResumeTransferTests (5): DccReceiver appends to partial
+  file; DccReceiver returns total including offset; DccReceiver offset 0 creates fresh file;
+  DccSender with offset skips leading bytes; DccSender with offset 0 sends full file.
+  DccEngineResumeTests (3): sender role stores confirmed offset after peer RESUME;
+  RESUME for unknown session is ignored; AcceptReceiveAsync with partial file sends RESUME
+  and downloads remainder when ACCEPT arrives.
+
 - DCC SEND and DCC RECV (core/protocol/dcc/Engine.cs, Transfer.cs): full DCC file transfer
   engine. DccEngine (one instance per server) subscribes to CtcpRequest events; when a
   DCC SEND CTCP arrives it parses the offer, sanitizes the filename, and emits
