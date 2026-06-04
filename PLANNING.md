@@ -187,7 +187,22 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   `ArchiveSettings` (storage/config/Schema.cs): `Enabled` (bool, default true) and `MaxAgeDays`
   (int, default 90); added to `AppConfig`; schema bumped to v4; migration v4 adds default
   archive object to existing configs.
-- [ ] SOCKS5 proxy transport; per-server proxy config; remote DNS resolution (no DNS leaks)
+- [x] SOCKS5 proxy transport: `Socks5Transport` (net/Socks5.cs) implements `INetworkProvider`.
+  Four internal-static handshake phases (testable without a real proxy):
+  1. `NegotiateMethodAsync` — sends greeting with NO AUTH (0x00) + optionally USERNAME/PASSWORD
+     (0x02); returns the proxy-selected method.
+  2. `AuthenticateAsync` — RFC 1929 sub-negotiation; throws `Socks5Exception` on rejection.
+  3. `SendConnectAsync` — CONNECT request with ATYP=0x03 (domain name, big-endian port).
+     The hostname is sent as-is; the proxy resolves DNS — no local lookup, no DNS leak.
+  4. `ReadConnectResponseAsync` — reads and validates the CONNECT reply; discards the bound
+     address (IPv4/IPv6/domain handled); throws `Socks5Exception` with the reply code on failure.
+  After a successful handshake, optionally wraps the stream in TLS via `TlsTransport.WrapAsync`.
+  `Socks5Exception` (IOException subclass with optional `ReplyCode` byte).
+  `TlsTransport` refactored: TLS logic extracted into `internal static WrapAsync(Stream, endpoint, ct)`
+  so both `TlsTransport.ConnectAsync` and `Socks5Transport.ConnectAsync` use the same path.
+  `ProxySettings` (storage/config/Schema.cs): sealed record (Host, Port, Username?, Password?);
+  added as `ServerEntry.Proxy?` (nullable, `= null` default, no schema bump — missing JSON key
+  deserializes as null). `ServerEntry.New()` updated to include `Proxy: null`.
 - [ ] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes); executable file type warnings; configurable download directory
 - [ ] DCC RESUME: transfer restart at byte offset
 - [ ] `LayoutManager`: tree view (mIRC-style server → channel hierarchy)

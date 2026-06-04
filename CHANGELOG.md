@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Socks5Transport (net/Socks5.cs): implements INetworkProvider; tunnels connections through a
+  SOCKS5 proxy. Constructor: Socks5Transport(proxyHost, proxyPort, username?, password?) and a
+  ProxySettings-based overload. ConnectAsync(NetworkEndpoint, ct): connects to the proxy via
+  HappyEyeballs, performs the four-phase handshake, then optionally layers TLS with
+  TlsTransport.WrapAsync. All four handshake phases are internal static methods for unit testing:
+  NegotiateMethodAsync (sends greeting — NO AUTH always, USERNAME/PASSWORD when credentials
+  present; validates proxy's SOCKS5 version byte; returns selected method), AuthenticateAsync
+  (RFC 1929 subnegotiation; encodes username+password as UTF-8 length-prefixed bytes; throws
+  Socks5Exception on rejection), SendConnectAsync (CONNECT request with ATYP=0x03 so the proxy
+  performs DNS resolution — the target hostname is never resolved locally, preventing DNS leaks;
+  port in big-endian two bytes), ReadConnectResponseAsync (reads four-byte header; maps non-zero
+  reply codes to Socks5Exception with ReplyCode; discards bound address respecting ATYP 0x01/
+  0x03/0x04 lengths; uses Stream.ReadExactlyAsync for framing correctness).
+
+- Socks5Exception (net/Socks5.cs): IOException subclass with optional byte? ReplyCode.
+  Reply codes 0x01–0x08 are mapped to descriptive strings in the exception message.
+
+- TlsTransport (net/Tls.cs): extracted TLS wrapping logic into internal static
+  WrapAsync(Stream inner, NetworkEndpoint endpoint, CancellationToken ct) so Socks5Transport
+  can apply TLS over a proxied TCP connection with the same certificate validation and
+  fingerprint-pin logic. TlsTransport.ConnectAsync refactored to call WrapAsync.
+
+- ProxySettings (storage/config/Schema.cs): sealed record (Host, Port, Username?, Password?).
+  Added as ServerEntry.Proxy? with default value null (no schema version bump — System.Text.Json
+  deserializes absent JSON keys as null for nullable reference types). ServerEntry.New() updated.
+
+- 17 new tests: Socks5TransportTests (15): NegotiateMethod sends correct greeting for no-auth
+  and credential cases; server selects 0x00 or 0x02 correctly; wrong SOCKS version throws;
+  Authenticate sends username+password bytes, accepts success, throws on rejection; SendConnect
+  uses ATYP=0x03 (remote DNS), encodes host correctly, encodes port big-endian; ReadConnect
+  succeeds for IPv4, throws with code on host-unreachable, handles IPv6 bound address; full
+  no-auth and full with-auth happy-path assertions. ConfigTests (2): ServerEntry.Proxy round-
+  trips through ConfigLoader, absent proxy field deserializes as null.
+
 - LogArchiver (storage/logs/Archive.cs): static class with ArchiveOldLogsAsync(logDirectory,
   maxAgeDays=90) that recursively enumerates *.log files and compresses those whose last-write
   time predates the cutoff to <name>.log.gz via GZipStream (CompressionLevel.Optimal), then

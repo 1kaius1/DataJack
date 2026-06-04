@@ -63,7 +63,8 @@ public sealed record ServerEntry(
     [property: JsonPropertyName("auto_join")]        List<string>     AutoJoinChannels,
     [property: JsonPropertyName("auto_connect")]     bool             AutoConnect,
     [property: JsonPropertyName("encoding")]         string           Encoding,
-    [property: JsonPropertyName("connect_commands")] List<string>     ConnectCommands)
+    [property: JsonPropertyName("connect_commands")] List<string>     ConnectCommands,
+    [property: JsonPropertyName("proxy")]             ProxySettings?   Proxy = null)
 {
     /// <summary>Convenience factory for a new blank server entry.</summary>
     public static ServerEntry New(string networkName, string address) => new(
@@ -80,8 +81,16 @@ public sealed record ServerEntry(
         AutoJoinChannels: new List<string>(),
         AutoConnect:      false,
         Encoding:         "UTF-8",
-        ConnectCommands:  new List<string>());
+        ConnectCommands:  new List<string>(),
+        Proxy:            null);
 }
+
+/// <summary>SOCKS5 proxy configuration for a server connection.</summary>
+public sealed record ProxySettings(
+    [property: JsonPropertyName("host")]     string  Host,
+    [property: JsonPropertyName("port")]     int     Port,
+    [property: JsonPropertyName("username")] string? Username = null,
+    [property: JsonPropertyName("password")] string? Password = null);
 
 /// <summary>SASL credentials for a server connection.</summary>
 public sealed record SaslCredentials(

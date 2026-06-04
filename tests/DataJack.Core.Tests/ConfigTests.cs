@@ -184,6 +184,51 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // ProxySettings (no schema version change — nullable field, null default)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ServerEntry_WithProxySettings_RoundTripsInConfig()
+    {
+        string path = Path.Combine(_tempDir, "settings_proxy.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var proxy  = new ProxySettings("proxy.example.com", 1080, "alice", "s3cr3t");
+        var entry  = ServerEntry.New("libera", "irc.libera.chat") with { Proxy = proxy };
+        var updated = loader.Config with { Servers = new List<ServerEntry> { entry } };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        var loaded = Assert.Single(loader2.Config.Servers);
+        Assert.NotNull(loaded.Proxy);
+        Assert.Equal("proxy.example.com", loaded.Proxy.Host);
+        Assert.Equal(1080,    loaded.Proxy.Port);
+        Assert.Equal("alice", loaded.Proxy.Username);
+        Assert.Equal("s3cr3t", loaded.Proxy.Password);
+    }
+
+    [Fact]
+    public async Task ServerEntry_WithoutProxy_DeserializesAsNull()
+    {
+        string path = Path.Combine(_tempDir, "settings_noproxy.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var entry   = ServerEntry.New("libera", "irc.libera.chat");  // Proxy = null
+        var updated = loader.Config with { Servers = new List<ServerEntry> { entry } };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        var loaded = Assert.Single(loader2.Config.Servers);
+        Assert.Null(loaded.Proxy);
+    }
+
+    // ---------------------------------------------------------------------------
     // Aliases (schema v2)
     // ---------------------------------------------------------------------------
 
