@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Phase 2 (Minimal Viable UI) complete. Phase 3 (HexChat Feature Parity) is next.
+**Status:** Phase 3 (HexChat Feature Parity) nearly complete. Phases 0-2 fully implemented and tested.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). All Phase 1 and Phase 2 components are implemented and tested.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Phase 3 remaining: away/idle management.
 
 ---
 
@@ -223,10 +223,22 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   at root level. SetLayoutMode/ToggleLayoutMode/CurrentLayoutMode API.
   /layout command in MainWindow persists mode to AppearanceSettings.LayoutMode
   (schema v6, migration v6 adds layout_mode="tabs" to existing configs).
-- [ ] Spell checking: platform-specific backends
-  - Windows: WinRT spell check API
-  - macOS: `NSSpellChecker`
-  - Linux: Enchant-2 (Hunspell/Aspell/Nuspell backends)
+- [x] Spell checking: platform-specific backends via `ISpellCheckService` (platform/spell/).
+  `NullSpellCheckService` fallback + `SpellCheckServiceFactory` OS selector.
+  Linux: `LinuxSpellCheckService` via Enchant-2 P/Invoke (libenchant-2.so.2; supports
+  Hunspell/Aspell/Nuspell); locale tag tried full then language-only fallback.
+  macOS: `MacosSpellCheckService` via ObjC runtime P/Invoke (`NSSpellChecker`);
+  `checkSpelling:startingAt:` + `guessesForWordRange:inString:` selectors;
+  `GCHandle`-pinned `initWithBytes:length:encoding:` for safe UTF-8 NSString creation.
+  Windows: `WindowsSpellCheckService` via `ISpellChecker` COM P/Invoke (vtable slot
+  delegation for `CreateSpellChecker`, `Check`, `Suggest`); `IEnumSpellingError` and
+  `IEnumString` drained via delegate-for-function-pointer.
+  All three backends degrade to `IsAvailable=false` on missing library or COM server.
+  `InputBox.SetSpellCheckService()`: right-click on a misspelled word shows up to 8
+  suggestions in a `ContextFlyout`; selecting one replaces the word in place; command
+  lines (`/`-prefixed) are never spell-checked. `LayoutManager.SetSpellCheckService()`
+  delegates to `InputBox`. `MainWindow` creates the service via the factory at startup
+  and wires it after config loads (so the UI thread owns the COM apartment on Windows).
 - [ ] Away/idle management: auto-away on idle timeout; `/away`, `/back`; away message in config
 
 ---

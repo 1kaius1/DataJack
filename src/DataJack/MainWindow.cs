@@ -2,6 +2,7 @@
 using Avalonia.Controls;
 using DataJack.Core.Events;
 using DataJack.Core.Storage.Config;
+using DataJack.Platform.Spell;
 using DataJack.Ui.Buffers;
 using DataJack.Ui.Dialogs;
 using DataJack.Ui.Layout;
@@ -16,11 +17,12 @@ namespace DataJack;
 /// </summary>
 internal sealed class MainWindow : Window
 {
-    private readonly EventDispatcher _dispatcher;
-    private readonly ConfigLoader    _configLoader;
-    private readonly ThemeManager    _themeManager;
-    private readonly BufferManager   _bufferManager;
-    private readonly LayoutManager   _layout;
+    private readonly EventDispatcher     _dispatcher;
+    private readonly ConfigLoader        _configLoader;
+    private readonly ThemeManager        _themeManager;
+    private readonly BufferManager       _bufferManager;
+    private readonly LayoutManager       _layout;
+    private readonly ISpellCheckService  _spellService;
 
     public MainWindow()
     {
@@ -40,6 +42,9 @@ internal sealed class MainWindow : Window
         // so the layout is usable before config loads. BootstrapAsync calls SetLayoutMode
         // again once the real preference is known.
         _layout = new LayoutManager(_bufferManager, _themeManager);
+
+        // Spell check service: created once; wired into the input box after config loads.
+        _spellService = SpellCheckServiceFactory.Create();
 
         Content = _layout;
 
@@ -69,6 +74,7 @@ internal sealed class MainWindow : Window
 
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
             _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
+            _layout.SetSpellCheckService(_spellService);
             _dispatcher.Start();
 
             ApplyTheme();
@@ -228,6 +234,7 @@ internal sealed class MainWindow : Window
         _layout.Dispose();
         _bufferManager.Dispose();
         _themeManager.Dispose();
+        _spellService.Dispose();
         _ = _dispatcher.DisposeAsync().AsTask();
         base.OnClosed(e);
     }

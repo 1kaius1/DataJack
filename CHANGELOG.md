@@ -8,6 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Spell checking (platform/spell/): `ISpellCheckService` interface with `Check(word)`
+  and `Suggest(word, maxSuggestions)`. `NullSpellCheckService` no-op fallback used on
+  unrecognized platforms or when the required native library is absent.
+  `SpellCheckServiceFactory.Create()` selects the backend by OS at runtime.
+
+  Linux: `LinuxSpellCheckService` (platform/spell/Linux.cs) via Enchant-2 P/Invoke
+  (libenchant-2.so.2). `enchant_broker_init` + `enchant_broker_request_dict` with the
+  current UI locale tag (e.g. "en_US"); falls back to the language code alone ("en") when
+  the full tag has no dictionary. `enchant_dict_check` returns 0 for correct words.
+  `enchant_dict_suggest` returns a char** which is iterated via `Marshal.ReadIntPtr` and
+  freed with `enchant_dict_free_string_list`. `IsAvailable` = false when libenchant-2 is
+  not installed or no matching dictionary exists for the locale.
+
+  macOS: `MacosSpellCheckService` (platform/spell/Macos.cs) via the Objective-C runtime
+  (`/usr/lib/libobjc.A.dylib`) + Foundation framework P/Invoke. Obtains the
+  `NSSpellChecker` singleton via `sharedSpellChecker`. Spell check uses
+  `checkSpelling:startingAt:language:wrap:inSpellDocumentWithTag:wordCount:` (NSRange
+  return via `objc_msgSend` — arm64-safe, no `_stret` needed). Suggestions use
+  `guessesForWordRange:inString:language:inSpellDocumentWithTag:` (NSArray* return). UTF-8
+  NSStrings are created via `initWithBytes:length:encoding:` (copying variant) with the
+  byte array pinned via `GCHandle` for the duration of the synchronous ObjC call, avoiding
+  both `unsafe` blocks and use-after-free. `IsAvailable` = false when Foundation cannot be
+  loaded or the ObjC runtime is unavailable.
+
+  Windows: `WindowsSpellCheckService` (platform/spell/Windows.cs) via the `ISpellChecker`
+  COM interface (Windows 8+). `CoCreateInstance` on `SpellCheckerFactory` CLSID, then
+  vtable slot 3 (`CreateSpellChecker`) invoked via `Marshal.GetDelegateForFunctionPointer`
+  with the current UI culture language tag (IETF, e.g. "en-US"). `Check`: vtable slot 4
+  on `ISpellChecker`; reads `IEnumSpellingError::Next` (slot 3) — S_FALSE (1) = correct.
+  `Suggest`: vtable slot 5 on `ISpellChecker`; drains `IEnumString::Next` (slot 3) up to
+  `maxSuggestions` strings. `IsAvailable` = false when COM server is unavailable or
+  `CreateSpellChecker` fails.
+
+  UI integration: `InputBox.SetSpellCheckService(ISpellCheckService)` subscribes to
+  `ContextRequested`. On right-click, the caret word is located via `FindWordAt` (letter,
+  apostrophe, hyphen boundaries); if misspelled, a `MenuFlyout` populated with up to 8
+  suggestions is set as `_textBox.ContextFlyout` and shown automatically. Each menu item
+  replaces the word in place and repositions the caret. Command lines (text starting with
+  '/') are never spell-checked. `LayoutManager.SetSpellCheckService()` delegates to
+  `InputBox`. `MainWindow` constructs the service at startup via `SpellCheckServiceFactory`
+  and calls `_layout.SetSpellCheckService` after config loads so the UI thread owns the
+  COM apartment (required on Windows for apartment-threaded COM).
+
 - LayoutManager tree view (ui/layout/LayoutManager.cs): mIRC-style vertical
   server/channel tree sidebar as an alternative to the HexChat-style tab bar.
   Two layout modes are now supported: "tabs" (Phase 2 default — horizontal TabControl

@@ -524,6 +524,14 @@ public sealed class LayoutManager : Grid, IDisposable
     // Public helpers
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// Wires a spell check service into the input box.
+    /// Has no effect when <see cref="DataJack.Platform.Spell.ISpellCheckService.IsAvailable"/>
+    /// is <see langword="false"/>.
+    /// </summary>
+    public void SetSpellCheckService(DataJack.Platform.Spell.ISpellCheckService service) =>
+        _inputBox.SetSpellCheckService(service);
+
     /// <summary>Update the status bar text (e.g. connection state, lag indicator).</summary>
     public void SetStatus(string text)
     {

@@ -284,5 +284,5 @@ Currently in: Phase 3 (HexChat Feature Parity). Phases 0-2 complete. Phase 3 ite
 completed: IRCParser phase-3 numerics, IRCv3 capability handlers, server-time, monitor,
 full IRCStateModel, full built-in command set, alias system, ServerListDialog,
 NotificationService, highlight pattern matching, log search, log archive, SOCKS5 proxy
-transport, DCC SEND/RECV, DCC RESUME, LayoutManager tree view.
-Phase 3 remaining: spell checking, away/idle management.
+transport, DCC SEND/RECV, DCC RESUME, LayoutManager tree view, spell checking.
+Phase 3 remaining: away/idle management.
