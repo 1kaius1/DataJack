@@ -45,6 +45,12 @@ public sealed class InputBox : Border
     /// <summary>Raised when the user submits a normal message (no '/' prefix).</summary>
     public event Action<string>? MessageSubmitted;
 
+    /// <summary>
+    /// Raised on every key-down event. Used by <c>IdleMonitor</c> to detect user
+    /// activity for auto-away purposes. Fires before the key is handled.
+    /// </summary>
+    public event Action? ActivityOccurred;
+
     // ---------------------------------------------------------------------------
     // Construction
     // ---------------------------------------------------------------------------
@@ -105,6 +111,8 @@ public sealed class InputBox : Border
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        ActivityOccurred?.Invoke();
+
         switch (e.Key)
         {
             case Key.Return:

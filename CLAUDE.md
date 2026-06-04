@@ -280,9 +280,5 @@ Behavioral rules are in `.clauderules`. Key reminders and C#-specific notes:
 
 See PLANNING.md for active goals, open questions, and pending decisions.
 
-Currently in: Phase 3 (HexChat Feature Parity). Phases 0-2 complete. Phase 3 items
-completed: IRCParser phase-3 numerics, IRCv3 capability handlers, server-time, monitor,
-full IRCStateModel, full built-in command set, alias system, ServerListDialog,
-NotificationService, highlight pattern matching, log search, log archive, SOCKS5 proxy
-transport, DCC SEND/RECV, DCC RESUME, LayoutManager tree view, spell checking.
-Phase 3 remaining: away/idle management.
+Phase 3 (HexChat Feature Parity) is complete. All items implemented and tested.
+Phase 4 (mIRC Feature Parity) is next. See PLANNING.md for Phase 4 items.

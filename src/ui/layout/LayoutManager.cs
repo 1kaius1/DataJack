@@ -95,6 +95,13 @@ public sealed class LayoutManager : Grid, IDisposable
     /// <summary>Raised when the user submits a plain message to the active buffer.</summary>
     public event Action<string, IBuffer?>? MessageIssued;
 
+    /// <summary>
+    /// Raised on every key-down in the input box. Forwarded from
+    /// <see cref="InputBox.ActivityOccurred"/>; wired into <c>IdleMonitor.NotifyActivity</c>
+    /// by <see cref="MainWindow"/> for auto-away tracking.
+    /// </summary>
+    public event Action? InputActivity;
+
     // ---------------------------------------------------------------------------
     // Construction
     // ---------------------------------------------------------------------------
@@ -179,8 +186,9 @@ public sealed class LayoutManager : Grid, IDisposable
         inputRow.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
 
         _inputBox = new InputBox(theme);
-        _inputBox.CommandSubmitted += OnCommandSubmitted;
-        _inputBox.MessageSubmitted += OnMessageSubmitted;
+        _inputBox.CommandSubmitted  += OnCommandSubmitted;
+        _inputBox.MessageSubmitted  += OnMessageSubmitted;
+        _inputBox.ActivityOccurred  += () => InputActivity?.Invoke();
         Grid.SetColumn(_inputBox, 0);
         inputRow.Children.Add(_inputBox);
 

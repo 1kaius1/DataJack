@@ -17,10 +17,11 @@ public sealed record AppConfig(
     [property: JsonPropertyName("aliases")]            Dictionary<string, string> Aliases,
     [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns,
     [property: JsonPropertyName("archive")]            ArchiveSettings            Archive,
-    [property: JsonPropertyName("dcc")]                DccSettings                Dcc)
+    [property: JsonPropertyName("dcc")]                DccSettings                Dcc,
+    [property: JsonPropertyName("away")]               AwaySettings               Away)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -33,7 +34,8 @@ public sealed record AppConfig(
         Aliases:           new Dictionary<string, string>(),
         HighlightPatterns: new List<HighlightPattern>(),
         Archive:           ArchiveSettings.Default(),
-        Dcc:               DccSettings.Default());
+        Dcc:               DccSettings.Default(),
+        Away:              AwaySettings.Default());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>
@@ -189,6 +191,22 @@ public sealed record DccSettings(
         DownloadDirectory: null,
         AutoAccept:        false,
         MaxFileSizeMb:     0);
+}
+
+/// <summary>Away status message and auto-away-on-idle configuration.</summary>
+public sealed record AwaySettings(
+    /// <summary>Message broadcast with the AWAY command. Shown to users who WHOIS or message the away user.</summary>
+    [property: JsonPropertyName("message")]              string AwayMessage,
+    /// <summary>When true, the client sends AWAY automatically after <see cref="AutoAwayDelaySec"/> seconds of input inactivity.</summary>
+    [property: JsonPropertyName("auto_away_enabled")]    bool   AutoAwayEnabled,
+    /// <summary>Seconds of input inactivity before auto-away triggers. Ignored when <see cref="AutoAwayEnabled"/> is false.</summary>
+    [property: JsonPropertyName("auto_away_delay_sec")]  int    AutoAwayDelaySec)
+{
+    /// <summary>Default: message "Away", auto-away off, 600-second (10-minute) idle delay.</summary>
+    internal static AwaySettings Default() => new(
+        AwayMessage:      "Away",
+        AutoAwayEnabled:  false,
+        AutoAwayDelaySec: 600);
 }
 
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>

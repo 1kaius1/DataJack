@@ -8,6 +8,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Away/idle management (core/irc/IdleMonitor.cs, storage/config/Schema.cs):
+
+  `AwaySettings` (storage/config/Schema.cs): sealed record (AwayMessage string,
+  AutoAwayEnabled bool, AutoAwayDelaySec int); defaults: message "Away", auto-away off,
+  600-second idle delay. Added as `AppConfig.Away`. Schema version bumped 6 -> 7.
+  `MigrateToV7` in Loader.cs adds the `away` object to existing v6 configs.
+
+  `IdleMonitor` (core/irc/IdleMonitor.cs): tracks user input activity for auto-away.
+  Constructor: `IdleMonitor(int delaySeconds, Func<int, CancellationToken, Task>?
+  delayFactory = null)`. `delayFactory` is injectable for deterministic unit tests; null
+  uses `Task.Delay`. Starts the countdown on construction. `NotifyActivity()`: atomically
+  swaps the current `CancellationTokenSource` (cancelling the in-flight countdown task),
+  fires `ActivityResumed` on the thread pool if the monitor was in the idle state, and
+  starts a new countdown. Thread safety: `Interlocked.Exchange` on both `_cts` (reference
+  type, swapped atomically) and `_idle` (int flag, 0=active/1=idle); `NotifyActivity` is
+  intended to be called from the Avalonia UI thread so concurrent calls are not expected,
+  but Dispose racing with the timer task is handled safely. `IdleTripped` event: fires
+  once per idle cycle on a thread-pool thread when the delay elapses without activity.
+  `ActivityResumed` event: fires on a thread-pool thread the first time `NotifyActivity`
+  is called after an idle cycle. `Dispose()`: cancels the active CTS so the countdown
+  task receives `OperationCanceledException` and exits cleanly; idempotent.
+
+  `InputBox.ActivityOccurred` (ui/layout/InputBox.cs): new event raised at the start of
+  every `OnKeyDown` handler, before key-specific processing. Used by `IdleMonitor` to
+  reset the idle countdown on each keystroke.
+
+  `LayoutManager.InputActivity` (ui/layout/LayoutManager.cs): new event forwarded from
+  `InputBox.ActivityOccurred` via a lambda subscription in the constructor. Provides the
+  idle-monitoring hook point to `MainWindow` without exposing `InputBox` directly.
+
+  `MainWindow` wiring: `BootstrapAsync` creates an `IdleMonitor` when
+  `config.Away.AutoAwayEnabled` is true and `AutoAwayDelaySec > 0`; subscribes
+  `_layout.InputActivity` to `_idleMonitor.NotifyActivity`, and `IdleTripped` /
+  `ActivityResumed` to `OnIdleTripped` / `OnActivityResumed` stubs (AWAY send deferred
+  to when connection management is wired up in a later task). `OnClosed` disposes the
+  monitor. The monitor is `null` when auto-away is disabled, so there is no overhead on
+  the common path.
+
+  13 new tests (tests/DataJack.Core.Tests/IdleMonitorTests.cs): Constructor_ZeroOrNegativeDelay_Throws
+  (Theory, 3 values); Constructor_PositiveDelay_DoesNotThrow; IdleTripped_FiredWhenDelayElapses;
+  IdleTripped_FiredExactlyOnce_PerIdleCycle; IdleTripped_NotFired_WhenActivityBeforeDelay;
+  ActivityResumed_FiredWhenUserTypesAfterIdle; ActivityResumed_NotFired_WhenNoIdleCycleOccurred;
+  ActivityResumed_FiredExactlyOnce_OnFirstKeystrokeAfterIdle; IdleAndResume_TwoCycles_BothFire;
+  Dispose_StopsCountdown_NoIdleTripped; Dispose_CalledTwice_DoesNotThrow;
+  NotifyActivity_AfterDispose_DoesNotThrow.
+
+  4 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsSeven;
+  Default_Away_HasExpectedDefaults; Loader_MigratesV6ToV7_AddsAwaySettings;
+  Loader_RoundTrip_PreservesAwaySettings. Loader_MigratesV5ToV6_AddsLayoutMode updated to
+  assert AppConfig.CurrentVersion (version-agnostic) instead of the hardcoded value 6.
+
 - Spell checking (platform/spell/): `ISpellCheckService` interface with `Check(word)`
   and `Suggest(word, maxSuggestions)`. `NullSpellCheckService` no-op fallback used on
   unrecognized platforms or when the required native library is absent.

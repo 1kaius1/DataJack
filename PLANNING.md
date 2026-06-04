@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Phase 3 (HexChat Feature Parity) nearly complete. Phases 0-2 fully implemented and tested.
+**Status:** Phase 3 (HexChat Feature Parity) complete. Phases 0-3 fully implemented and tested.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Phase 3 remaining: away/idle management.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Phase 4 (mIRC Feature Parity) is next.
 
 ---
 
@@ -239,7 +239,20 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
   lines (`/`-prefixed) are never spell-checked. `LayoutManager.SetSpellCheckService()`
   delegates to `InputBox`. `MainWindow` creates the service via the factory at startup
   and wires it after config loads (so the UI thread owns the COM apartment on Windows).
-- [ ] Away/idle management: auto-away on idle timeout; `/away`, `/back`; away message in config
+- [x] Away/idle management: `AwaySettings` config record (storage/config/Schema.cs): away
+  message, auto_away_enabled, auto_away_delay_sec; defaults: "Away", false, 600 s.
+  Schema v7; `MigrateToV7` adds the `away` object to existing configs.
+  `IdleMonitor` (core/irc/IdleMonitor.cs): injectable-delay timer (thread-pool) that
+  fires `IdleTripped` once per idle cycle and `ActivityResumed` on first keystroke after
+  idle; `NotifyActivity()` atomically swaps the `CancellationTokenSource` and restarts
+  the countdown; `Dispose()` cancels in-flight countdown cleanly; thread-safe via
+  `Interlocked.Exchange` on both the CTS and the idle flag.
+  `InputBox.ActivityOccurred`: event raised on every `KeyDown` before key handling.
+  `LayoutManager.InputActivity`: forwarded from `InputBox.ActivityOccurred`; wired into
+  `IdleMonitor.NotifyActivity` by `MainWindow`.
+  `MainWindow`: creates `IdleMonitor` in `BootstrapAsync` if auto-away is enabled;
+  hooks `IdleTripped` / `ActivityResumed` (AWAY send stubs, pending connection
+  management); disposes monitor in `OnClosed`.
 
 ---
 

@@ -273,10 +273,20 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsSix()
+    public void Default_Config_SchemaVersionIsSeven()
     {
-        Assert.Equal(6, AppConfig.CurrentVersion);
-        Assert.Equal(6, AppConfig.Default().SchemaVersion);
+        Assert.Equal(7, AppConfig.CurrentVersion);
+        Assert.Equal(7, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public void Default_Away_HasExpectedDefaults()
+    {
+        var config = AppConfig.Default();
+        Assert.NotNull(config.Away);
+        Assert.Equal("Away", config.Away.AwayMessage);
+        Assert.False(config.Away.AutoAwayEnabled);
+        Assert.Equal(600, config.Away.AutoAwayDelaySec);
     }
 
     [Fact]
@@ -432,7 +442,8 @@ public sealed class ConfigTests : IAsyncDisposable
         var loader = new ConfigLoader(path);
         await loader.LoadAsync();
 
-        Assert.Equal(6, loader.Config.SchemaVersion);
+        // v5 → v6 → v7 all run; result is always current version.
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
         Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
     }
 
@@ -585,5 +596,75 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.Empty(loader.Config.Aliases);
         Assert.NotNull(loader.Config.HighlightPatterns);
         Assert.Empty(loader.Config.HighlightPatterns);
+    }
+
+    // ---------------------------------------------------------------------------
+    // v6 → v7 migration: away object
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Loader_MigratesV6ToV7_AddsAwaySettings()
+    {
+        string path = Path.Combine(_tempDir, "settings_v6.json");
+
+        string v6Json = """
+            {
+              "schema_version": 6,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000,
+                "layout_mode": "tabs"
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0
+              },
+              "aliases": {},
+              "highlight_patterns": [],
+              "archive": { "enabled": true, "max_age_days": 90 },
+              "dcc": { "download_directory": null, "auto_accept": false, "max_file_size_mb": 0 }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v6Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
+        Assert.NotNull(loader.Config.Away);
+        Assert.Equal("Away", loader.Config.Away.AwayMessage);
+        Assert.False(loader.Config.Away.AutoAwayEnabled);
+        Assert.Equal(600, loader.Config.Away.AutoAwayDelaySec);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesAwaySettings()
+    {
+        string path = Path.Combine(_tempDir, "settings_away.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Away = new DataJack.Core.Storage.Config.AwaySettings("Be right back", true, 300),
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.Equal("Be right back", loader2.Config.Away.AwayMessage);
+        Assert.True(loader2.Config.Away.AutoAwayEnabled);
+        Assert.Equal(300, loader2.Config.Away.AutoAwayDelaySec);
     }
 }

@@ -110,6 +110,8 @@ public sealed class ConfigLoader
         5 => MigrateToV5(node),
         // v6 adds "layout_mode" to the "appearance" object for tree/tabs navigation.
         6 => MigrateToV6(node),
+        // v7 adds the "away" object for away message and auto-away-on-idle settings.
+        7 => MigrateToV7(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -172,6 +174,22 @@ public sealed class ConfigLoader
         }
 
         node["schema_version"] = 6;
+        return node;
+    }
+
+    private static JsonNode MigrateToV7(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj && obj["away"] is null)
+        {
+            obj["away"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["message"]              = "Away",
+                ["auto_away_enabled"]    = false,
+                ["auto_away_delay_sec"]  = 600,
+            };
+        }
+
+        node["schema_version"] = 7;
         return node;
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using Avalonia.Controls;
 using DataJack.Core.Events;
+using DataJack.Core.Irc;
 using DataJack.Core.Storage.Config;
 using DataJack.Platform.Spell;
 using DataJack.Ui.Buffers;
@@ -23,6 +24,7 @@ internal sealed class MainWindow : Window
     private readonly BufferManager       _bufferManager;
     private readonly LayoutManager       _layout;
     private readonly ISpellCheckService  _spellService;
+    private IdleMonitor?                 _idleMonitor;
 
     public MainWindow()
     {
@@ -75,6 +77,17 @@ internal sealed class MainWindow : Window
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
             _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
             _layout.SetSpellCheckService(_spellService);
+
+            // Start the idle monitor if auto-away is configured.
+            var awayCfg = _configLoader.Config.Away;
+            if (awayCfg.AutoAwayEnabled && awayCfg.AutoAwayDelaySec > 0)
+            {
+                _idleMonitor = new IdleMonitor(awayCfg.AutoAwayDelaySec);
+                _layout.InputActivity        += _idleMonitor.NotifyActivity;
+                _idleMonitor.IdleTripped     += OnIdleTripped;
+                _idleMonitor.ActivityResumed += OnActivityResumed;
+            }
+
             _dispatcher.Start();
 
             ApplyTheme();
@@ -156,6 +169,22 @@ internal sealed class MainWindow : Window
     }
 
     // ---------------------------------------------------------------------------
+    // Auto-away / idle
+    // ---------------------------------------------------------------------------
+
+    private void OnIdleTripped()
+    {
+        // TODO Phase 3: send AWAY <message> on all connected servers once connection
+        // management is wired up. The away message is _configLoader.Config.Away.AwayMessage.
+    }
+
+    private void OnActivityResumed()
+    {
+        // TODO Phase 3: send bare AWAY (back) on all connected servers once connection
+        // management is wired up.
+    }
+
+    // ---------------------------------------------------------------------------
     // Connection management
     // ---------------------------------------------------------------------------
 
@@ -231,6 +260,7 @@ internal sealed class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _idleMonitor?.Dispose();
         _layout.Dispose();
         _bufferManager.Dispose();
         _themeManager.Dispose();
