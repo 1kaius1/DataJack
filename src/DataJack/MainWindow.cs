@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Collections.Concurrent;
 using Avalonia.Controls;
 using DataJack.Core.Events;
 using DataJack.Core.Irc;
@@ -24,6 +25,7 @@ internal sealed class MainWindow : Window
     private readonly BufferManager       _bufferManager;
     private readonly LayoutManager       _layout;
     private readonly ISpellCheckService  _spellService;
+    private readonly ConcurrentDictionary<string, ServerSession> _sessions = new();
     private IdleMonitor?                 _idleMonitor;
     private DebugLogger?                 _debugLogger;
 
@@ -237,11 +239,27 @@ internal sealed class MainWindow : Window
         _ = ConnectToServerAsync(entry);
     }
 
-    private Task ConnectToServerAsync(ServerEntry entry)
+    private async Task ConnectToServerAsync(ServerEntry entry)
     {
-        // TODO Phase 3: instantiate IRCConnection, NetworkProvider, etc. and connect.
-        _bufferManager.GetType(); // reference to suppress unused warning
-        return Task.CompletedTask;
+        // Dispose any existing session for this server name before reconnecting.
+        if (_sessions.TryRemove(entry.NetworkName, out var old))
+            await old.DisposeAsync().ConfigureAwait(false);
+
+        try
+        {
+            var session = await ServerSession.ConnectAsync(
+                entry, _configLoader.Config, _dispatcher).ConfigureAwait(false);
+            _sessions[entry.NetworkName] = session;
+        }
+        catch (Exception ex)
+        {
+            // ConnectionFailed is already published by IRCConnection; this catch covers
+            // any exception that escapes before the connection attempt starts.
+            var netBuf = _bufferManager.Buffers.OfType<NetworkStatusBuffer>().FirstOrDefault();
+            netBuf?.AddMessage(new MessageEntry(
+                DateTimeOffset.Now, null, MessageKind.Error,
+                $"Connect error ({entry.NetworkName}): {ex.Message}", null));
+        }
     }
 
     private void OpenServerList()
@@ -266,6 +284,10 @@ internal sealed class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        foreach (var (_, session) in _sessions)
+            _ = session.DisposeAsync().AsTask();
+        _sessions.Clear();
+
         _debugLogger?.Dispose();
         _idleMonitor?.Dispose();
         _layout.Dispose();
