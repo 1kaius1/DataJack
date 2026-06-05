@@ -19,9 +19,9 @@ Build a first-class, cross-platform IRC client for Linux, Windows, and macOS wit
 
 ## Current Status
 
-**Status:** Phase 2 (Minimal Viable UI) complete. Phase 3 (HexChat Feature Parity) is next.
+**Status:** Phase 3 (HexChat Feature Parity) complete. Phases 0-3 fully implemented and tested.
 
-Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). All Phase 1 and Phase 2 components are implemented and tested.
+Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). Stack is decided (C# .NET 10 + Avalonia 12). Phase 4 (mIRC Feature Parity) is next.
 
 ---
 
@@ -87,29 +87,172 @@ Architecture is documented and finalized in [ARCHITECTURE.md](ARCHITECTURE.md). 
 ### Phase 3 — HexChat Feature Parity
 *A daily-driveable client matching HexChat's feature set.*
 
-- [ ] Full IRCv3 capability handlers (`/core/caps/handlers/` — one file per capability)
-- [ ] `server-time` tag used for all displayed timestamps
-- [ ] `monitor` capability for nick online/offline tracking; `MonitorStatusChanged` events
-- [ ] Full `IRCStateModel`: topic + who/time, away status, account names, ISUPPORT tokens
-- [ ] Full built-in command set (ARCHITECTURE.md §13): `/kick`, `/ban`, `/mode`, `/op`, `/voice`, `/whois`, `/who`, `/ignore`, `/list`, `/names`, `/timer`, `/help`, etc.
-- [ ] Alias system: `/alias` command; `%1`/`%*` substitution; stored in config
-- [ ] `ServerListDialog`: complete — all fields (SASL credentials, auto-join, connect commands); import/export JSON
-- [ ] `NotificationService`: highlight and PM desktop notifications on all three platforms
-  - Windows: WinRT `ToastNotificationManager`
-  - macOS: `UNUserNotificationCenter`
-  - Linux: `org.freedesktop.Notifications` D-Bus interface
-- [ ] Highlight pattern matching: literal (case-insensitive), wildcard, regex; current nick always implicit
-- [ ] Log search: SQLite FTS5 index; `nick:`, `server:`, date range filters; paginated results
-- [ ] Log archive: compression (gzip/zstd); configurable rotation age; `ExportManager` (plain text and HTML)
-- [ ] SOCKS5 proxy transport; per-server proxy config; remote DNS resolution (no DNS leaks)
-- [ ] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes); executable file type warnings; configurable download directory
-- [ ] DCC RESUME: transfer restart at byte offset
-- [ ] `LayoutManager`: tree view (mIRC-style server → channel hierarchy)
-- [ ] Spell checking: platform-specific backends
-  - Windows: WinRT spell check API
-  - macOS: `NSSpellChecker`
-  - Linux: Enchant-2 (Hunspell/Aspell/Nuspell backends)
-- [ ] Away/idle management: auto-away on idle timeout; `/away`, `/back`; away message in config
+- [x] Extended `IRCParser` with all Phase 3 numerics and IRCv3 protocol commands (005 ISUPPORT,
+  311/312/317/318/330 WHOIS assembly, 315/352 WHO, 322/323 LIST, 329 creation time, 332/333
+  TOPIC, 353/366 NAMES, 367/368 ban list, 730/731 MONITOR, MODE, AWAY, CHGHOST, ACCOUNT,
+  SETNAME); switched to sequential channel drain loop for in-order multi-line reply assembly.
+  New event types: IsupportTokensReceived, ChannelListEntry, ChannelListEnd, NamesEntry,
+  NamesListReceived, UserModeChanged, WhoEnd. TopicChanged.SetterNick is now string?.
+- [x] Full IRCv3 capability handlers (`/core/caps/handlers/` — one file per capability):
+  CapabilityRegistry (active-cap + local-nick state); ServerTimeHandler (timestamp resolution);
+  EchoMessageHandler (IsEchoedMessage predicate); MonitorHandler (watchlist + MONITOR protocol);
+  BatchHandler (BATCH +/- accumulation, emits BatchReceived); LabeledResponseHandler (label
+  generation; full correlation is Phase 4).
+- [x] `server-time` tag used for all displayed timestamps (ServerTimeHandler.GetTimestamp)
+- [x] `monitor` capability for nick online/offline tracking; `MonitorStatusChanged` events
+  (730/731 in parser; MonitorHandler manages watchlist and reconnect resubscription)
+- [x] Full `IRCStateModel`: `IRCStateUpdater` subscribes to all protocol events for one server
+  and drives `IRCStateModel.Apply` to maintain the snapshot tree: connection lifecycle,
+  ISUPPORT token accumulation, IRCv3 active-cap set, channel membership (join/part/kick/quit/
+  nick rename), topic + creation time, channel and prefix modes, NAMES user list with
+  prefix-to-mode mapping, WHO/WHOIS user-info backfill, CHGHOST, away status, account,
+  realname (SETNAME), and MONITOR online/offline status.
+- [x] Full built-in command set (ARCHITECTURE.md §13): 21 new methods added to
+  `IRCCommandRouter`: `/kick` (KICK), `/ban`+`/unban` (MODE +/-b), `/kickban` (MODE +b
+  then KICK), `/op`+`/deop` (MODE +/-o), `/voice`+`/devoice` (MODE +/-v), `/mode`
+  (general MODE with optional parameter list), `/invite` (INVITE), `/topic` (TOPIC
+  set/clear), `/names` (NAMES), `/list` (LIST with optional filter), `/whois` (WHOIS),
+  `/who` (WHO), `/query` (PRIVMSG on message or no-op), `/me` (CTCP ACTION), `/ctcp`
+  (arbitrary CTCP request), `/ping` (CTCP PING with UTC millisecond timestamp),
+  `/away`+`/back` (AWAY set/clear). Commands deferred to later tasks: `/ignore`,
+  `/unignore` (require ignore-list manager), `/timer` (requires timer subsystem),
+  `/set` (requires config access), `/help` (requires help-text registry), `/connect`,
+  `/reconnect` (require multi-server bootstrap).
+- [x] Alias system: `AliasManager` with `/alias` and `/unalias` command handlers;
+  single-pass `%1`..`%9` and `%*` argument substitution; case-insensitive name
+  lookup; `AliasesChanged` event for config persistence; aliases stored in
+  `AppConfig.Aliases` (schema v2); schema v2 migration adds empty aliases map
+  to existing v1 configs.
+- [x] `ServerListDialog`: complete — all fields exposed in the edit form (username
+  override, realname override, SASL mechanism/account/password, connect commands
+  one-per-line); scrollable edit panel; Import/Export JSON buttons using Avalonia
+  StorageProvider file picker. `ServerListExport` (storage/config/ServerListExport.cs)
+  handles serialization: exports to a versioned envelope (`datajack_server_list_version`,
+  `exported_at`, `servers[]`); import assigns fresh UUIDs to all entries and sanitizes
+  null list fields and blank encoding.
+- [x] `NotificationService`: highlight and PM desktop notifications on all three platforms.
+  `INotificationService` / `NotificationInfo` / `NotificationKind` defined in
+  `platform/notifications/Service.cs`. `NotificationDispatcher` subscribes to
+  `MessageReceived` and `ActionReceived`; fires `PrivateMessage` notifications for
+  direct messages and `Highlight` notifications for channel messages/actions whose text
+  contains the current nick as a whole word (case-insensitive; bounded by non-alphanumeric,
+  non-underscore characters). `NullNotificationService` no-op for testing.
+  `NotificationServiceFactory` selects backend by OS at runtime.
+  - Linux: `LinuxNotificationService` (notify-send subprocess → org.freedesktop.Notifications)
+  - macOS: `MacosNotificationService` (osascript `display notification`; target is
+    `UNUserNotificationCenter` — native P/Invoke binding deferred pending code-signing)
+  - Windows: `WindowsNotificationService` (PowerShell WinRT script; target is WinRT
+    C# projection — deferred pending net10.0-windows retarget)
+- [x] Highlight pattern matching: `HighlightMatcher` (core/irc/HighlightMatcher.cs) — static,
+  thread-safe. `HighlightPatternKind` enum (Literal/Wildcard/Regex) and `HighlightPattern`
+  record (Expression, Kind, CaseSensitive) added to config schema (storage/config/Schema.cs).
+  `IsHighlight(text, currentNick, patterns)`: checks the current nick as a whole word
+  first (ContainsNickAsWord), then evaluates each configured pattern. `Matches(text, pattern)`:
+  Literal — OrdinalIgnoreCase (or Ordinal when CaseSensitive); Wildcard — glob converted to
+  anchored regex via GlobToRegex (`*`→`.*`, `?`→`.`, regex metacharacters escaped), always
+  case-insensitive; Regex — full .NET regex with 100 ms timeout, invalid patterns return
+  false. `AppConfig.HighlightPatterns` stored as JSON array; schema bumped to v3; migration
+  v3 adds empty array to existing v2 configs. `NotificationDispatcher` updated to accept
+  optional `Func<IReadOnlyList<HighlightPattern>>` patternsGetter and delegate the channel
+  highlight check to `HighlightMatcher.IsHighlight` (existing nick-only behavior preserved
+  when getter is null).
+- [x] Log search: `LogFtsIndex` (storage/logs/Indexer.cs) backed by a standalone SQLite FTS5
+  virtual table `log_messages`. `from_nick` and `text` are FTS-indexed (unicode61 tokenizer);
+  `server`, `target`, `ts`, `kind` are UNINDEXED (stored, not tokenized). `InitializeAsync`
+  creates the table if absent. `IndexAsync(LogEntry)` inserts and returns the entry with
+  the assigned rowid as `Id`. `SearchAsync(SearchQuery, page, pageSize)` returns a
+  `SearchResultPage` with `Entries`, `TotalCount`, `Page`, `PageSize`, and `HasMore`.
+  When `SearchQuery.Text` is non-empty it is passed directly to `log_messages MATCH`
+  (FTS5 query syntax: phrases, exclusions, etc.) and results are ordered by FTS5 rank then
+  timestamp DESC; invalid FTS5 queries return empty rather than throwing. When `Text` is
+  empty only metadata filters are applied (full table scan). Metadata filters: `Nick`
+  (case-insensitive exact match), `Server` (exact match), `After`/`Before` (Unix timestamp
+  range). `LogEntry` (storage/logs/LogEntry.cs): Id, Server, Target, FromNick, Text,
+  Timestamp, Kind (`LogEntryKind`: Message/Action/Notice/ServerMessage). `SearchQuery`
+  and `SearchResultPage` (storage/logs/SearchQuery.cs).
+- [x] Log archive: `LogArchiver` (storage/logs/Archive.cs) — `ArchiveOldLogsAsync(dir, maxAgeDays)`
+  enumerates `*.log` files recursively and gzip-compresses those whose last-write time exceeds
+  `maxAgeDays` days, producing `<name>.log.gz` and deleting the original. Compression via
+  `System.IO.Compression.GZipStream` (optimal level); disposal order of nested `await using`
+  guarantees the gzip footer is flushed before the output FileStream closes. Already-compressed
+  `.log.gz` files and non-existent directories are silently skipped. zstd planned for a future
+  phase when a pure-.NET implementation is available.
+  `ExportManager` (storage/logs/Export.cs) — `ExportAsync(entries, stream, format)` and
+  `ExportToStringAsync` convenience overload. Two formats: `ExportFormat.PlainText` (one line per
+  entry: `[yyyy-MM-dd HH:mm:ss] <nick> text` / `* nick text` / `-nick- text` / `*** text`; UTC
+  timestamps) and `ExportFormat.Html` (self-contained document with embedded CSS, dark theme,
+  per-kind colour classes; `WebUtility.HtmlEncode` applied to nick and text to prevent XSS).
+  `StreamWriter` uses `new UTF8Encoding(false)` (no BOM) so the empty-export case returns an
+  empty string.
+  `ArchiveSettings` (storage/config/Schema.cs): `Enabled` (bool, default true) and `MaxAgeDays`
+  (int, default 90); added to `AppConfig`; schema bumped to v4; migration v4 adds default
+  archive object to existing configs.
+- [x] SOCKS5 proxy transport: `Socks5Transport` (net/Socks5.cs) implements `INetworkProvider`.
+  Four internal-static handshake phases (testable without a real proxy):
+  1. `NegotiateMethodAsync` — sends greeting with NO AUTH (0x00) + optionally USERNAME/PASSWORD
+     (0x02); returns the proxy-selected method.
+  2. `AuthenticateAsync` — RFC 1929 sub-negotiation; throws `Socks5Exception` on rejection.
+  3. `SendConnectAsync` — CONNECT request with ATYP=0x03 (domain name, big-endian port).
+     The hostname is sent as-is; the proxy resolves DNS — no local lookup, no DNS leak.
+  4. `ReadConnectResponseAsync` — reads and validates the CONNECT reply; discards the bound
+     address (IPv4/IPv6/domain handled); throws `Socks5Exception` with the reply code on failure.
+  After a successful handshake, optionally wraps the stream in TLS via `TlsTransport.WrapAsync`.
+  `Socks5Exception` (IOException subclass with optional `ReplyCode` byte).
+  `TlsTransport` refactored: TLS logic extracted into `internal static WrapAsync(Stream, endpoint, ct)`
+  so both `TlsTransport.ConnectAsync` and `Socks5Transport.ConnectAsync` use the same path.
+  `ProxySettings` (storage/config/Schema.cs): sealed record (Host, Port, Username?, Password?);
+  added as `ServerEntry.Proxy?` (nullable, `= null` default, no schema bump — missing JSON key
+  deserializes as null). `ServerEntry.New()` updated to include `Proxy: null`.
+- [x] DCC SEND and DCC RECV: file path sanitization (no traversal, no null bytes, Windows-
+  style `\` separator handled cross-platform); executable file type warning (30+ extensions);
+  configurable download directory (DccSettings, schema v5). DccEngine (one per server)
+  parses incoming CTCP DCC SEND offers via DccCtcpParser, sanitizes filenames via
+  DccFilenameSanitizer, emits DccOfferReceived, and provides AcceptReceiveAsync /
+  InitiateSendAsync. DccReceiver / DccSender handle the actual TCP I/O with 4-byte ACK
+  protocol. DccSession snapshot tracks per-session state.
+- [x] DCC RESUME: transfer restart at byte offset. DccCtcpParser.TryParseResumeOrAccept
+  parses both RESUME and ACCEPT CTCP messages (same structure: filename port offset).
+  Receiver role: AcceptReceiveAsync detects a partial file, sends DCC RESUME via
+  IRCConnection, awaits DCC ACCEPT (30 s timeout, falls back to fresh download), then
+  resumes from the confirmed offset using DccReceiver with append mode.
+  Sender role: incoming DCC RESUME CTCP stores the offset in _confirmedResumeOffsets
+  and replies DCC ACCEPT; background send task seeks to offset via DccSender.
+- [x] `LayoutManager`: tree view (mIRC-style server → channel hierarchy).
+  LayoutManager gains two modes: "tabs" (Phase 2 tab bar) and "tree" (200 px
+  sidebar TreeView). Buffers grouped under collapsible server nodes; global buffers
+  at root level. SetLayoutMode/ToggleLayoutMode/CurrentLayoutMode API.
+  /layout command in MainWindow persists mode to AppearanceSettings.LayoutMode
+  (schema v6, migration v6 adds layout_mode="tabs" to existing configs).
+- [x] Spell checking: platform-specific backends via `ISpellCheckService` (platform/spell/).
+  `NullSpellCheckService` fallback + `SpellCheckServiceFactory` OS selector.
+  Linux: `LinuxSpellCheckService` via Enchant-2 P/Invoke (libenchant-2.so.2; supports
+  Hunspell/Aspell/Nuspell); locale tag tried full then language-only fallback.
+  macOS: `MacosSpellCheckService` via ObjC runtime P/Invoke (`NSSpellChecker`);
+  `checkSpelling:startingAt:` + `guessesForWordRange:inString:` selectors;
+  `GCHandle`-pinned `initWithBytes:length:encoding:` for safe UTF-8 NSString creation.
+  Windows: `WindowsSpellCheckService` via `ISpellChecker` COM P/Invoke (vtable slot
+  delegation for `CreateSpellChecker`, `Check`, `Suggest`); `IEnumSpellingError` and
+  `IEnumString` drained via delegate-for-function-pointer.
+  All three backends degrade to `IsAvailable=false` on missing library or COM server.
+  `InputBox.SetSpellCheckService()`: right-click on a misspelled word shows up to 8
+  suggestions in a `ContextFlyout`; selecting one replaces the word in place; command
+  lines (`/`-prefixed) are never spell-checked. `LayoutManager.SetSpellCheckService()`
+  delegates to `InputBox`. `MainWindow` creates the service via the factory at startup
+  and wires it after config loads (so the UI thread owns the COM apartment on Windows).
+- [x] Away/idle management: `AwaySettings` config record (storage/config/Schema.cs): away
+  message, auto_away_enabled, auto_away_delay_sec; defaults: "Away", false, 600 s.
+  Schema v7; `MigrateToV7` adds the `away` object to existing configs.
+  `IdleMonitor` (core/irc/IdleMonitor.cs): injectable-delay timer (thread-pool) that
+  fires `IdleTripped` once per idle cycle and `ActivityResumed` on first keystroke after
+  idle; `NotifyActivity()` atomically swaps the `CancellationTokenSource` and restarts
+  the countdown; `Dispose()` cancels in-flight countdown cleanly; thread-safe via
+  `Interlocked.Exchange` on both the CTS and the idle flag.
+  `InputBox.ActivityOccurred`: event raised on every `KeyDown` before key handling.
+  `LayoutManager.InputActivity`: forwarded from `InputBox.ActivityOccurred`; wired into
+  `IdleMonitor.NotifyActivity` by `MainWindow`.
+  `MainWindow`: creates `IdleMonitor` in `BootstrapAsync` if auto-away is enabled;
+  hooks `IdleTripped` / `ActivityResumed` (AWAY send stubs, pending connection
+  management); disposes monitor in `OnClosed`.
 
 ---
 

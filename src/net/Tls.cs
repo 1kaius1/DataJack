@@ -22,18 +22,37 @@ public sealed class TlsTransport : INetworkProvider
             endpoint.AddressFamily,
             ct).ConfigureAwait(false);
 
-        var networkStream = new NetworkStream(socket, ownsSocket: true);
+        Stream networkStream = new NetworkStream(socket, ownsSocket: true);
+        try
+        {
+            return await WrapAsync(networkStream, endpoint, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await networkStream.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
 
+    /// <summary>
+    /// Wrap an already-connected <paramref name="inner"/> stream in a TLS client session.
+    /// Used by <see cref="Socks5Transport"/> to add TLS on top of a proxied TCP connection.
+    /// </summary>
+    /// <exception cref="TlsCertificateException">Certificate validation failure.</exception>
+    /// <exception cref="AuthenticationException">TLS handshake failure.</exception>
+    internal static async Task<Stream> WrapAsync(
+        Stream inner, NetworkEndpoint endpoint, CancellationToken ct)
+    {
         // Capture validation failure details in the callback so we can surface them
         // in TlsCertificateException after AuthenticateAsClientAsync throws.
-        X509Certificate2? failedCert = null;
-        SslPolicyErrors failedErrors = SslPolicyErrors.None;
+        X509Certificate2? failedCert   = null;
+        SslPolicyErrors   failedErrors = SslPolicyErrors.None;
 
         var sslOptions = new SslClientAuthenticationOptions
         {
-            TargetHost = endpoint.Host,
+            TargetHost          = endpoint.Host,
             EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-            ClientCertificates = endpoint.ClientCertificate is not null
+            ClientCertificates  = endpoint.ClientCertificate is not null
                 ? new X509CertificateCollection { endpoint.ClientCertificate }
                 : null,
             RemoteCertificateValidationCallback = (_, cert, _, errors) =>
@@ -42,13 +61,13 @@ public sealed class TlsTransport : INetworkProvider
                 if (!valid)
                 {
                     failedErrors = errors;
-                    failedCert = cert is not null ? new X509Certificate2(cert) : null;
+                    failedCert   = cert is not null ? new X509Certificate2(cert) : null;
                 }
                 return valid;
             },
         };
 
-        var sslStream = new SslStream(networkStream, leaveInnerStreamOpen: false);
+        var sslStream = new SslStream(inner, leaveInnerStreamOpen: false);
         try
         {
             await sslStream.AuthenticateAsClientAsync(sslOptions, ct).ConfigureAwait(false);

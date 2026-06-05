@@ -8,6 +8,640 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Reconnect-enabled config flag (storage/config/Schema.cs, Loader.cs):
+
+  `AdvancedSettings.ReconnectEnabled` (bool, default `false`). When false, no
+  automatic reconnection occurs after any disconnect. When true, involuntary
+  disconnects trigger the existing exponential-backoff reconnect loop; voluntary
+  `/quit` still never reconnects because `ServerSession.DisposeAsync` is called
+  immediately after the QUIT is sent, cancelling the `ReconnectController` CTS
+  before `ConnectionClosed` fires. Schema bumped 8 -> 9; `MigrateToV9` in
+  Loader.cs adds `reconnect_enabled: false` to existing configs.
+
+- BufferManager event coverage (ui/buffers/Manager.cs):
+
+  Subscriptions added for 22 previously unhandled event types so that server
+  output is visible rather than silently discarded:
+
+  Connection/reconnect: `ConnectionFailed`, `ReconnectScheduled`,
+  `ReconnectSucceeded`, `ReconnectFailed` -- shown in the server status buffer
+  so the user sees connection feedback.
+
+  Registration: `SASLStarted`, `SASLSucceeded`, `SASLFailed` -- shown in the
+  server status buffer during SASL negotiation.
+
+  Channel housekeeping: `NamesListReceived` silently populates
+  `ChannelBuffer.Members` (the nicklist) without adding a chat line.
+  `ChannelModeChanged` and `UserModeChanged` shown as `MessageKind.Mode` lines.
+  `InviteReceived` shown as a notice in server status.
+
+  Queries: `WhoIsReply`/`WhoIsEnd` and `WhoReplyEntry`/`WhoEnd` formatted as
+  info lines in the server status buffer so `/whois` and `/who` produce visible
+  output.
+
+  Channel list: `ChannelListEntry` (compact `channel (count) topic` per line)
+  and `ChannelListEnd` shown in server status so `/list` produces output.
+
+  Ban list: `BanListEntry` and `BanListEnd` shown in server status.
+
+  Messaging: `WallopsReceived` shown as a notice; `CtcpRequest` and `CtcpReply`
+  shown as notices in server status.
+
+  Errors: `NickInUse` and `PrivilegeError` shown as error lines in server status.
+
+  Nicklist maintenance: `OnJoinedChannel` now adds the joining nick to
+  `ChannelBuffer.Members`; `OnPartedChannel` and `OnKickReceived` now remove
+  the departing nick. `OnNickChanged` falls back to the server status buffer
+  when the user is not in any channel (e.g. `/nick` before joining).
+
+### Changed
+
+- `ReconnectController` is now opt-in (DataJack/ServerSession.cs):
+
+  `_reconnect` is nullable; `ServerSession.ConnectAsync` only instantiates
+  `ReconnectController` when `config.Advanced.ReconnectEnabled` is true.
+  `DisposeAsync` null-checks before awaiting the controller.
+
+- `/quit` cleans up the session (DataJack/MainWindow.cs):
+
+  After `QuitAsync` returns, the session is removed from `_sessions` and
+  `DisposeAsync` is called immediately. This guarantees no reconnect attempt
+  occurs even when `ReconnectEnabled` is true, and frees server resources
+  promptly.
+
+### Added
+- Away/idle management (core/irc/IdleMonitor.cs, storage/config/Schema.cs):
+
+  `AwaySettings` (storage/config/Schema.cs): sealed record (AwayMessage string,
+  AutoAwayEnabled bool, AutoAwayDelaySec int); defaults: message "Away", auto-away off,
+  600-second idle delay. Added as `AppConfig.Away`. Schema version bumped 6 -> 7.
+  `MigrateToV7` in Loader.cs adds the `away` object to existing v6 configs.
+
+  `IdleMonitor` (core/irc/IdleMonitor.cs): tracks user input activity for auto-away.
+  Constructor: `IdleMonitor(int delaySeconds, Func<int, CancellationToken, Task>?
+  delayFactory = null)`. `delayFactory` is injectable for deterministic unit tests; null
+  uses `Task.Delay`. Starts the countdown on construction. `NotifyActivity()`: atomically
+  swaps the current `CancellationTokenSource` (cancelling the in-flight countdown task),
+  fires `ActivityResumed` on the thread pool if the monitor was in the idle state, and
+  starts a new countdown. Thread safety: `Interlocked.Exchange` on both `_cts` (reference
+  type, swapped atomically) and `_idle` (int flag, 0=active/1=idle); `NotifyActivity` is
+  intended to be called from the Avalonia UI thread so concurrent calls are not expected,
+  but Dispose racing with the timer task is handled safely. `IdleTripped` event: fires
+  once per idle cycle on a thread-pool thread when the delay elapses without activity.
+  `ActivityResumed` event: fires on a thread-pool thread the first time `NotifyActivity`
+  is called after an idle cycle. `Dispose()`: cancels the active CTS so the countdown
+  task receives `OperationCanceledException` and exits cleanly; idempotent.
+
+  `InputBox.ActivityOccurred` (ui/layout/InputBox.cs): new event raised at the start of
+  every `OnKeyDown` handler, before key-specific processing. Used by `IdleMonitor` to
+  reset the idle countdown on each keystroke.
+
+  `LayoutManager.InputActivity` (ui/layout/LayoutManager.cs): new event forwarded from
+  `InputBox.ActivityOccurred` via a lambda subscription in the constructor. Provides the
+  idle-monitoring hook point to `MainWindow` without exposing `InputBox` directly.
+
+  `MainWindow` wiring: `BootstrapAsync` creates an `IdleMonitor` when
+  `config.Away.AutoAwayEnabled` is true and `AutoAwayDelaySec > 0`; subscribes
+  `_layout.InputActivity` to `_idleMonitor.NotifyActivity`, and `IdleTripped` /
+  `ActivityResumed` to `OnIdleTripped` / `OnActivityResumed` stubs (AWAY send deferred
+  to when connection management is wired up in a later task). `OnClosed` disposes the
+  monitor. The monitor is `null` when auto-away is disabled, so there is no overhead on
+  the common path.
+
+  13 new tests (tests/DataJack.Core.Tests/IdleMonitorTests.cs): Constructor_ZeroOrNegativeDelay_Throws
+  (Theory, 3 values); Constructor_PositiveDelay_DoesNotThrow; IdleTripped_FiredWhenDelayElapses;
+  IdleTripped_FiredExactlyOnce_PerIdleCycle; IdleTripped_NotFired_WhenActivityBeforeDelay;
+  ActivityResumed_FiredWhenUserTypesAfterIdle; ActivityResumed_NotFired_WhenNoIdleCycleOccurred;
+  ActivityResumed_FiredExactlyOnce_OnFirstKeystrokeAfterIdle; IdleAndResume_TwoCycles_BothFire;
+  Dispose_StopsCountdown_NoIdleTripped; Dispose_CalledTwice_DoesNotThrow;
+  NotifyActivity_AfterDispose_DoesNotThrow.
+
+  4 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsSeven;
+  Default_Away_HasExpectedDefaults; Loader_MigratesV6ToV7_AddsAwaySettings;
+  Loader_RoundTrip_PreservesAwaySettings. Loader_MigratesV5ToV6_AddsLayoutMode updated to
+  assert AppConfig.CurrentVersion (version-agnostic) instead of the hardcoded value 6.
+
+- Spell checking (platform/spell/): `ISpellCheckService` interface with `Check(word)`
+  and `Suggest(word, maxSuggestions)`. `NullSpellCheckService` no-op fallback used on
+  unrecognized platforms or when the required native library is absent.
+  `SpellCheckServiceFactory.Create()` selects the backend by OS at runtime.
+
+  Linux: `LinuxSpellCheckService` (platform/spell/Linux.cs) via Enchant-2 P/Invoke
+  (libenchant-2.so.2). `enchant_broker_init` + `enchant_broker_request_dict` with the
+  current UI locale tag (e.g. "en_US"); falls back to the language code alone ("en") when
+  the full tag has no dictionary. `enchant_dict_check` returns 0 for correct words.
+  `enchant_dict_suggest` returns a char** which is iterated via `Marshal.ReadIntPtr` and
+  freed with `enchant_dict_free_string_list`. `IsAvailable` = false when libenchant-2 is
+  not installed or no matching dictionary exists for the locale.
+
+  macOS: `MacosSpellCheckService` (platform/spell/Macos.cs) via the Objective-C runtime
+  (`/usr/lib/libobjc.A.dylib`) + Foundation framework P/Invoke. Obtains the
+  `NSSpellChecker` singleton via `sharedSpellChecker`. Spell check uses
+  `checkSpelling:startingAt:language:wrap:inSpellDocumentWithTag:wordCount:` (NSRange
+  return via `objc_msgSend` — arm64-safe, no `_stret` needed). Suggestions use
+  `guessesForWordRange:inString:language:inSpellDocumentWithTag:` (NSArray* return). UTF-8
+  NSStrings are created via `initWithBytes:length:encoding:` (copying variant) with the
+  byte array pinned via `GCHandle` for the duration of the synchronous ObjC call, avoiding
+  both `unsafe` blocks and use-after-free. `IsAvailable` = false when Foundation cannot be
+  loaded or the ObjC runtime is unavailable.
+
+  Windows: `WindowsSpellCheckService` (platform/spell/Windows.cs) via the `ISpellChecker`
+  COM interface (Windows 8+). `CoCreateInstance` on `SpellCheckerFactory` CLSID, then
+  vtable slot 3 (`CreateSpellChecker`) invoked via `Marshal.GetDelegateForFunctionPointer`
+  with the current UI culture language tag (IETF, e.g. "en-US"). `Check`: vtable slot 4
+  on `ISpellChecker`; reads `IEnumSpellingError::Next` (slot 3) — S_FALSE (1) = correct.
+  `Suggest`: vtable slot 5 on `ISpellChecker`; drains `IEnumString::Next` (slot 3) up to
+  `maxSuggestions` strings. `IsAvailable` = false when COM server is unavailable or
+  `CreateSpellChecker` fails.
+
+  UI integration: `InputBox.SetSpellCheckService(ISpellCheckService)` subscribes to
+  `ContextRequested`. On right-click, the caret word is located via `FindWordAt` (letter,
+  apostrophe, hyphen boundaries); if misspelled, a `MenuFlyout` populated with up to 8
+  suggestions is set as `_textBox.ContextFlyout` and shown automatically. Each menu item
+  replaces the word in place and repositions the caret. Command lines (text starting with
+  '/') are never spell-checked. `LayoutManager.SetSpellCheckService()` delegates to
+  `InputBox`. `MainWindow` constructs the service at startup via `SpellCheckServiceFactory`
+  and calls `_layout.SetSpellCheckService` after config loads so the UI thread owns the
+  COM apartment (required on Windows for apartment-threaded COM).
+
+- LayoutManager tree view (ui/layout/LayoutManager.cs): mIRC-style vertical
+  server/channel tree sidebar as an alternative to the HexChat-style tab bar.
+  Two layout modes are now supported: "tabs" (Phase 2 default — horizontal TabControl
+  at the top) and "tree" (new — fixed-width 200 px TreeView sidebar on the left).
+  In tree mode the tab bar is hidden; buffers are grouped under collapsible server
+  parent nodes (expanded by default). Global buffers (NetworkStatus, Highlights) sit
+  at the root level outside any server group. Leaf nodes carry a kind prefix: "#" for
+  channels, "~" for queries, "D" for DCC chat, "!" for notices, "%" for the raw log.
+  Unread messages are signalled by changing the node foreground to the theme's
+  TabUnreadForeground color (same heuristic as the tab bar). Selecting a node activates
+  its buffer identically to selecting a tab. Switching modes preserves the active buffer
+  and restores its selection in the target view.
+
+  SetLayoutMode(mode): switches to "tabs" or "tree" instantly; ignores illegal values.
+  ToggleLayoutMode(): flips between the two modes.
+  CurrentLayoutMode property: returns the active mode string.
+
+  /layout command (MainWindow.cs): /layout tabs|tree|toggle switches the mode and
+  persists the preference to config. /layout toggle flips between the two modes.
+
+  LayoutMode (storage/config/Schema.cs): added to AppearanceSettings as
+  "layout_mode" (string, default "tabs"). Schema version bumped 5 -> 6.
+  MigrateToV6 in Loader.cs adds "layout_mode": "tabs" to the "appearance" object
+  of existing v5 configs. BootstrapAsync in MainWindow.cs calls
+  _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode) after loading
+  config so the persisted preference is applied on startup.
+
+  3 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsSix,
+  Default_Appearance_LayoutModeIsTabs, Loader_MigratesV5ToV6_AddsLayoutMode,
+  Loader_RoundTrip_PreservesLayoutMode. Existing v3-to-v4 and v4-to-v5 migration
+  tests updated to assert AppConfig.CurrentVersion (version-agnostic) and check
+  that the layout_mode field is present after the full migration chain.
+
+- DCC RESUME (core/protocol/dcc/Engine.cs, Transfer.cs): transfer restart at byte offset.
+  DccCtcpParser.TryParseResumeOrAccept parses the shared RESUME / ACCEPT CTCP format
+  (RESUME|ACCEPT filename port offset, quoted filenames supported). DccEngine gains three
+  new roles: receiver role — AcceptReceiveAsync detects a partial on-disk file and (when
+  an IRCConnection is configured) sends DCC RESUME, registers a pending TaskCompletionSource
+  keyed by (filename, port), awaits DCC ACCEPT (30 s timeout, falls back to fresh download),
+  then passes the confirmed offset to DccReceiver; sender role — OnCtcpRequest handles
+  incoming DCC RESUME by matching a Pending Send session, storing the offset in
+  _confirmedResumeOffsets, and sending DCC ACCEPT back via IRCConnection; sender role —
+  the background send task in InitiateSendAsync consumes _confirmedResumeOffsets[sessionId]
+  (default 0) and passes it to DccSender. DccReceiver.ReceiveAsync and DccSender.SendAsync
+  each gain a long resumeOffset = 0 parameter: receiver opens the file in append mode when
+  resumeOffset > 0 so existing bytes are preserved; ACK = resumeOffset + sessionBytes
+  so the sender can track overall progress; returns total bytes on disk (resumeOffset +
+  sessionBytes). Sender seeks the file to resumeOffset before streaming, progress reports
+  total bytes (resumeOffset + sessionSent). DccEngine.AddSessionForTest, HasConfirmedResumeOffset,
+  and GetConfirmedResumeOffset are internal test helpers. DccEngine constructor gains an
+  optional IRCConnection? ircConnection = null parameter; all existing call sites are
+  unaffected.
+
+  23 new tests (DccCtcpParserResumeTests, DccResumeTransferTests, DccEngineResumeTests):
+  DccCtcpParserResumeTests (12): RESUME bare filename; RESUME quoted filename; ACCEPT;
+  offset 0 is valid; case-insensitive RESUME/ACCEPT/resume/accept (Theory 4 cases);
+  unknown subcommand (SEND) returns false; null/empty params; invalid port; negative offset;
+  missing offset; missing port. DccResumeTransferTests (5): DccReceiver appends to partial
+  file; DccReceiver returns total including offset; DccReceiver offset 0 creates fresh file;
+  DccSender with offset skips leading bytes; DccSender with offset 0 sends full file.
+  DccEngineResumeTests (3): sender role stores confirmed offset after peer RESUME;
+  RESUME for unknown session is ignored; AcceptReceiveAsync with partial file sends RESUME
+  and downloads remainder when ACCEPT arrives.
+
+- DCC SEND and DCC RECV (core/protocol/dcc/Engine.cs, Transfer.cs): full DCC file transfer
+  engine. DccEngine (one instance per server) subscribes to CtcpRequest events; when a
+  DCC SEND CTCP arrives it parses the offer, sanitizes the filename, and emits
+  DccOfferReceived for the UI to present to the user. AcceptReceiveAsync(sessionId)
+  connects to the peer, streams the file to the download directory, and emits DccStarted,
+  periodic DccProgress, and DccCompleted or DccFailed. InitiateSendAsync(connection, nick,
+  filePath) listens on a random port, sends the CTCP DCC SEND message, and waits for the
+  peer to connect in a background task before streaming the file and emitting the same
+  lifecycle events. Each session is tracked in DccEngine.Sessions as an immutable DccSession
+  snapshot (Id, Type, PeerNick, PeerAddress, PeerPort, Status, Filename, FileSize,
+  BytesTransferred, TransferRate, ErrorMessage).
+
+- DccFilenameSanitizer (core/protocol/dcc/Engine.cs): public static class, thread-safe.
+  Sanitize(filename): strips all directory components (both / and \, so Windows-style
+  traversal sequences like "..\..\" work correctly on all platforms) via Path.GetFileName
+  after normalizing backslashes to forward slashes; rejects filenames containing null
+  bytes; rejects bare "." and ".."; caps result at 255 characters; returns null when the
+  filename must be rejected entirely.
+  IsExecutable(filename): returns true when the file extension matches a set of 30+
+  extensions associated with executable code or scripts (.exe, .bat, .cmd, .sh, .bash,
+  .zsh, .fish, .ps1, .py, .rb, .pl, .lua, .js, .vbs, .jar, .app, .dmg, .deb, .rpm,
+  .run, .elf, and more); case-insensitive; returns false for null or empty input.
+  A true result should trigger an additional confirmation prompt in the UI.
+
+- DccCtcpParser (core/protocol/dcc/Engine.cs): internal static class; TryParse parses the
+  params string of a CtcpRequest whose Command is "DCC". Handles both bare filenames
+  (SEND file.txt ...) and quoted filenames with embedded spaces (SEND "my file.txt" ...).
+  IP address is parsed as a decimal uint32 in network byte order (big-endian) and converted
+  to dotted-decimal. A trailing passive-DCC token after the file size is silently ignored.
+  Returns false for null/empty params, unknown subcommands (CHAT, RESUME, ACCEPT), invalid
+  IP/port/size values, or missing required fields.
+
+- DCC file transfer I/O (core/protocol/dcc/Transfer.cs): DccReceiver.ReceiveAsync reads
+  data from the peer stream in 32 KB chunks, writes to the output file, and sends a 4-byte
+  big-endian ACK after each chunk carrying the running total bytes received (clamped to
+  uint.MaxValue for files >4 GB, consistent with all major DCC clients). DccSender.SendAsync
+  reads the file and streams it to the peer in 32 KB chunks while a background DrainAcksAsync
+  task drains 4-byte ACKs from the receiver to prevent TCP receive buffer overflow.
+
+- DCC event types (core/events/Types.cs): DccTransferType enum (Send, Receive, Chat);
+  DccSessionStatus enum (Pending, Active, Paused, Completed, Failed); DccOfferReceived
+  (carries Server, SessionId, PeerNick, Type, Filename, FileSize, PeerAddress, PeerPort,
+  IsExecutable); DccOfferSent; DccStarted; DccProgress (BytesTransferred, TransferRate);
+  DccCompleted (BytesTransferred); DccFailed (Reason); DccChatMessageReceived and
+  DccChatMessageSent (Phase 4 placeholders).
+
+- DccSettings (storage/config/Schema.cs): sealed record (DownloadDirectory string?,
+  AutoAccept bool, MaxFileSizeMb int); defaults: null directory (resolves to ~/Downloads),
+  auto-accept off, no size limit. Added as AppConfig.Dcc. Schema version bumped 4 -> 5;
+  MigrateToV5 in Loader.cs adds a default dcc object to existing v4 configs.
+
+- 67 new tests (tests/DataJack.Core.Tests/DccEngineTests.cs):
+  DccCtcpParserTests (15): valid SEND with bare filename; valid SEND with quoted filename
+  containing spaces; IP conversion for 127.0.0.1, 0.0.0.0, and 255.255.255.255; port 0
+  (passive DCC); trailing token ignored; false for null/empty/unknown subcommand/missing
+  port/missing size/oversized IP/invalid port/negative size; case-insensitive subcommand.
+  DccFilenameSanitizerTests (27): Sanitize preserves normal filenames and extensions;
+  strips Unix path traversal; strips Windows path traversal; strips absolute Unix path;
+  strips absolute Windows path; handles names at and over 255 chars; rejects null, empty,
+  null bytes, lone dot, double dot, and slash-only; IsExecutable returns true for 13
+  dangerous extensions (Theory), false for 6 safe extensions (Theory), case-insensitive
+  match, no extension returns false, null/empty returns false.
+  DccEngineTests (19): CtcpRequest -> DccOfferReceived emitted; offer fields (server, nick,
+  filename, size, address, port, type) are correct; session ID is non-empty Guid; two offers
+  have distinct session IDs; .exe file sets IsExecutable true; .jpg sets IsExecutable false;
+  path traversal filename is sanitized in offer; session stored with Pending status; events
+  from other server ignored; non-DCC CTCP ignored; unparseable DCC payload ignored;
+  AcceptReceiveAsync downloads correct bytes; AcceptReceiveAsync emits DccStarted;
+  AcceptReceiveAsync with unknown session ID throws; ResolveDownloadDirectory with explicit
+  path returns it; ResolveDownloadDirectory with null falls back to ~/Downloads.
+  DccReceiverTests (3): ReceiveAsync writes all bytes; ReceiveAsync stops at expectedSize
+  with a larger stream; ReceiveAsync reports progress.
+
+- 4 new config tests (ConfigTests.cs): Default_Config_SchemaVersionIsFive,
+  Default_Dcc_HasExpectedDefaults, Loader_MigratesV4ToV5_AddsDccSettings,
+  Loader_RoundTrip_PreservesDccSettings. Loader_MigratesV3ToV4_AddsArchiveSettings
+  updated to assert AppConfig.CurrentVersion (version-agnostic) rather than 4, and
+  now also asserts Dcc settings are present after the full migration chain.
+
+- Socks5Transport (net/Socks5.cs): implements INetworkProvider; tunnels connections through a
+  SOCKS5 proxy. Constructor: Socks5Transport(proxyHost, proxyPort, username?, password?) and a
+  ProxySettings-based overload. ConnectAsync(NetworkEndpoint, ct): connects to the proxy via
+  HappyEyeballs, performs the four-phase handshake, then optionally layers TLS with
+  TlsTransport.WrapAsync. All four handshake phases are internal static methods for unit testing:
+  NegotiateMethodAsync (sends greeting — NO AUTH always, USERNAME/PASSWORD when credentials
+  present; validates proxy's SOCKS5 version byte; returns selected method), AuthenticateAsync
+  (RFC 1929 subnegotiation; encodes username+password as UTF-8 length-prefixed bytes; throws
+  Socks5Exception on rejection), SendConnectAsync (CONNECT request with ATYP=0x03 so the proxy
+  performs DNS resolution — the target hostname is never resolved locally, preventing DNS leaks;
+  port in big-endian two bytes), ReadConnectResponseAsync (reads four-byte header; maps non-zero
+  reply codes to Socks5Exception with ReplyCode; discards bound address respecting ATYP 0x01/
+  0x03/0x04 lengths; uses Stream.ReadExactlyAsync for framing correctness).
+
+- Socks5Exception (net/Socks5.cs): IOException subclass with optional byte? ReplyCode.
+  Reply codes 0x01–0x08 are mapped to descriptive strings in the exception message.
+
+- TlsTransport (net/Tls.cs): extracted TLS wrapping logic into internal static
+  WrapAsync(Stream inner, NetworkEndpoint endpoint, CancellationToken ct) so Socks5Transport
+  can apply TLS over a proxied TCP connection with the same certificate validation and
+  fingerprint-pin logic. TlsTransport.ConnectAsync refactored to call WrapAsync.
+
+- ProxySettings (storage/config/Schema.cs): sealed record (Host, Port, Username?, Password?).
+  Added as ServerEntry.Proxy? with default value null (no schema version bump — System.Text.Json
+  deserializes absent JSON keys as null for nullable reference types). ServerEntry.New() updated.
+
+- 17 new tests: Socks5TransportTests (15): NegotiateMethod sends correct greeting for no-auth
+  and credential cases; server selects 0x00 or 0x02 correctly; wrong SOCKS version throws;
+  Authenticate sends username+password bytes, accepts success, throws on rejection; SendConnect
+  uses ATYP=0x03 (remote DNS), encodes host correctly, encodes port big-endian; ReadConnect
+  succeeds for IPv4, throws with code on host-unreachable, handles IPv6 bound address; full
+  no-auth and full with-auth happy-path assertions. ConfigTests (2): ServerEntry.Proxy round-
+  trips through ConfigLoader, absent proxy field deserializes as null.
+
+- LogArchiver (storage/logs/Archive.cs): static class with ArchiveOldLogsAsync(logDirectory,
+  maxAgeDays=90) that recursively enumerates *.log files and compresses those whose last-write
+  time predates the cutoff to <name>.log.gz via GZipStream (CompressionLevel.Optimal), then
+  deletes the original. *.log.gz files are excluded by the glob pattern and never recompressed.
+  Non-existent directories return immediately. CompressToAsync uses three chained await using
+  var declarations whose reverse-order disposal ensures the GZip footer is written before the
+  output FileStream is closed. zstd planned for a future phase.
+
+- ExportManager (storage/logs/Export.cs): static class with ExportAsync(entries, stream,
+  format, ct) and ExportToStringAsync convenience wrapper. ExportFormat enum: PlainText, Html.
+  PlainText: one line per LogEntry, format varies by LogEntryKind — Message: "[ts] <nick> text",
+  Action: "[ts] * nick text", Notice: "[ts] -nick- text", ServerMessage: "[ts] *** text".
+  Timestamps are UTC, formatted as "yyyy-MM-dd HH:mm:ss". Html: self-contained document with
+  embedded dark-theme CSS (1e1e1e background), per-kind colour classes (message/action/notice/
+  server), line-level div elements with ts/nick/text spans. System.Net.WebUtility.HtmlEncode
+  applied to from_nick and text fields prevents XSS in exported HTML. StreamWriter uses
+  new UTF8Encoding(false) (no BOM marker) so an empty-input export returns an empty string.
+
+- ArchiveSettings (storage/config/Schema.cs): sealed record (Enabled bool, MaxAgeDays int);
+  default Enabled=true, MaxAgeDays=90. Added as AppConfig.Archive; CurrentVersion bumped 3→4;
+  MigrateToV4 adds {"enabled": true, "max_age_days": 90} to configs that lack the "archive"
+  key. Loader_MigratesV2ToV3 test updated to use AppConfig.CurrentVersion (version-agnostic
+  assertion); Default_Config_SchemaVersionIsThree test removed and replaced with
+  Default_Config_SchemaVersionIsFour.
+
+- 27 new tests: LogArchiverTests (9): non-existent directory returns without error, empty
+  directory is no-op, old file is compressed, old file original deleted, recent file not
+  touched, existing gz skipped, CompressFileAsync creates gz, deletes original, content
+  preserved after decompress. ExportManagerTests (15): plain text empty, message format,
+  action asterisk, notice dashes, server-message triple-asterisk, UTC timestamp, multiple
+  lines; HTML empty returns complete document, contains style block, message nick and text,
+  timestamp, action class, notice class, special chars HTML-encoded, multiple entries;
+  ExportToString matches stream for both formats. ConfigTests (3 net new): schema version 4,
+  default archive settings, v3-to-v4 migration.
+
+- LogFtsIndex (storage/logs/Indexer.cs): SQLite FTS5 search index over IRC log entries.
+  Single standalone virtual table log_messages: from_nick and text are FTS-indexed with
+  the unicode61 tokenizer; server, target, ts, kind are UNINDEXED (stored for retrieval
+  and metadata filtering). InitializeAsync creates the table idempotently. IndexAsync
+  inserts a LogEntry and returns it with the assigned SQLite rowid as Id. SearchAsync
+  accepts a SearchQuery (Text, Nick, Server, After, Before), a zero-based page index,
+  and a page size (default 50); returns a SearchResultPage. When SearchQuery.Text is
+  non-empty it is passed to "log_messages MATCH @ftsQuery" using FTS5 query syntax
+  (quotes for phrases, hyphen for NOT, column:term for column-scoped search); results are
+  ordered by FTS5 rank then ts DESC. When Text is empty, only metadata filters are applied
+  (full table scan) and results are ordered by ts DESC. Invalid FTS5 queries are caught
+  (SqliteException) and return an empty page rather than surfacing the error. Nick filter
+  uses COLLATE NOCASE exact match. After/Before filters compare Unix-second timestamps
+  stored as INTEGER. Uses two separate SqliteCommand objects (INSERT then SELECT
+  last_insert_rowid()) to avoid multi-statement limitations in Microsoft.Data.Sqlite.
+
+- LogEntry (storage/logs/LogEntry.cs): sealed record (Id, Server, Target, FromNick, Text,
+  Timestamp, Kind). LogEntryKind enum: Message, Action, Notice, ServerMessage. Id is 0
+  for unsaved entries and is the SQLite rowid after indexing.
+
+- SearchQuery (storage/logs/SearchQuery.cs): sealed record (Text, Nick?, Server?,
+  After?, Before?). SearchResultPage: sealed record (Entries, TotalCount, Page, PageSize)
+  with computed HasMore = (Page + 1) * PageSize < TotalCount.
+
+- 27 new tests (tests/DataJack.Core.Tests/LogFtsIndexTests.cs): empty database; single
+  entry found by text; FTS case-insensitive; no-match; FTS phrase query; invalid FTS5
+  query returns empty; empty/whitespace text returns all; nick filter match/case-insensitive/
+  exclude; server filter match/exclude; after/before date filters; combined date range;
+  text+nick combined; text+server combined; TotalCount; timestamp-descending ordering;
+  pagination (page 0, page 1, HasMore true, HasMore false); action entry indexed; assigned
+  Id; full field round-trip.
+
+- HighlightMatcher (core/irc/HighlightMatcher.cs): stateless, thread-safe static class for
+  evaluating highlight patterns against IRC message text. IsHighlight(text, currentNick,
+  patterns) checks the current nick as a whole word first (ContainsNickAsWord: OrdinalIgnoreCase,
+  bounded by non-alphanumeric/non-underscore chars or string edges, returns false for empty
+  nick), then evaluates each HighlightPattern in order and returns true on first match.
+  Matches(text, pattern) dispatches by HighlightPatternKind: Literal uses
+  OrdinalIgnoreCase (or Ordinal when CaseSensitive=true) substring search; Wildcard
+  converts the glob expression to an anchored .NET regex via GlobToRegex (* -> .*, ? -> .,
+  all other metacharacters escaped) and matches case-insensitively with a 100 ms timeout;
+  Regex compiles the expression with IgnoreCase unless CaseSensitive is set, applies a
+  100 ms timeout, and returns false on RegexParseException. Empty expressions always return
+  false. ContainsNickAsWord is public for use by scripts/plugins.
+
+- HighlightPattern (storage/config/Schema.cs): sealed record with Expression (string),
+  Kind (HighlightPatternKind enum, JSON-serialized as string via JsonStringEnumConverter),
+  and CaseSensitive (bool, default false). HighlightPatternKind enum: Literal, Wildcard,
+  Regex. AppConfig.HighlightPatterns (List<HighlightPattern>) added; schema version bumped
+  from 2 to 3; MigrateToV3 in Loader.cs adds an empty highlight_patterns array to v2 files.
+
+- NotificationDispatcher (platform/notifications/Service.cs): refactored channel highlight
+  detection to delegate to HighlightMatcher.IsHighlight. New optional constructor parameter
+  Func<IReadOnlyList<HighlightPattern>>? patternsGetter (default null) is invoked on each
+  channel message; null is treated as an empty pattern list. ContainsNickAsWord and
+  IsWordChar removed from NotificationDispatcher (now live in HighlightMatcher).
+
+- 50 new tests; 8 ContainsNickAsWord tests moved from NotificationDispatcherTests to
+  HighlightMatcherTests (DataJack.Core.Tests/HighlightMatcherTests.cs, 50 tests total):
+  9 ContainsNickAsWord tests (empty nick, standalone, start/end/middle/embedded/underscore-
+  prefix/case-insensitive/repeated-occurrence); 7 Literal tests (case-insensitive, exact,
+  substring, no-match, empty expression, case-sensitive-match, case-sensitive-no-match);
+  9 Wildcard tests (star alone, star at ends, star in middle, question mark match, question
+  mark too-short, case-insensitive, no match, empty, dot-escaped); 7 Regex tests (simple,
+  default-case-insensitive, case-sensitive-wrong-case, case-sensitive-correct-case, word-
+  boundary, invalid-pattern, empty); 4 GlobToRegex tests (star, question, dot-escaped,
+  anchored); 14 IsHighlight integration tests (null nick, nick match, nick no-match,
+  literal/wildcard/regex pattern, first/second pattern match, no-match, pattern-matches-
+  without-nick, nick-matches-without-pattern). 3 schema-v3 tests added to ConfigTests
+  (HighlightPatterns empty by default, schema version 3, v2→v3 migration, v1 full chain).
+  Stale Default_Config_SchemaVersionIsTwo test removed; Loader_MigratesV1ToV2 updated to
+  assert CurrentVersion and also check HighlightPatterns is present and empty.
+
+- NotificationService (platform/notifications/): INotificationService interface with
+  IsSupported and NotifyAsync(NotificationInfo, CancellationToken). NotificationInfo
+  record carries Title, Body, and NotificationKind (Highlight, PrivateMessage, DccOffer,
+  WatchedNickOnline). NullNotificationService is the no-op implementation used in tests
+  and on unsupported platforms. NotificationServiceFactory.Create() selects
+  LinuxNotificationService, MacosNotificationService, or WindowsNotificationService at
+  runtime via RuntimeInformation.
+
+- NotificationDispatcher (platform/notifications/Service.cs): subscribes to
+  MessageReceived and ActionReceived on the event bus; reads the current nick from
+  IRCStateModel.CreateQuery() on each event. Fires PrivateMessage notifications for
+  non-channel PRIVMSGs and ACTIONs not sent by the local user. Fires Highlight
+  notifications for channel messages and actions whose text contains the current nick
+  as a whole word (ContainsNickAsWord: case-insensitive, bounded by non-alphanumeric /
+  non-underscore characters or string edges; returns false for empty nick; scans all
+  occurrences to handle repeated non-matching positions). Implements IDisposable to
+  unsubscribe from the bus on disposal.
+
+- LinuxNotificationService (platform/notifications/Linux.cs): [SupportedOSPlatform("linux")].
+  Spawns notify-send with title, body, --app-name=DataJack, --expire-time=5000, and a
+  freedesktop icon name chosen by NotificationKind. Uses ProcessStartInfo.ArgumentList
+  (no shell interpolation). Silently swallows all exceptions.
+
+- MacosNotificationService (platform/notifications/Macos.cs): [SupportedOSPlatform("macos")].
+  Spawns osascript -e "display notification..." with title and body escaped for AppleScript
+  double-quoted strings. Silently swallows all exceptions. Target API is
+  UNUserNotificationCenter; osascript is the Phase 3 vehicle pending code-signing.
+
+- WindowsNotificationService (platform/notifications/Windows.cs): [SupportedOSPlatform("windows")].
+  Spawns powershell.exe -NoProfile -NonInteractive with a WinRT script loading
+  Windows.UI.Notifications via ContentType=WindowsRuntime and showing a ToastText02 toast.
+  Silently swallows all exceptions. Target API is the WinRT C# projection; PowerShell is
+  the Phase 3 vehicle pending net10.0-windows retarget.
+
+- 28 new tests (tests/DataJack.Core.Tests/NotificationDispatcherTests.cs): 8 unit tests
+  for ContainsNickAsWord (empty nick, alone, start/end/middle with punctuation, embedded
+  in longer word, underscore-prefixed, case-insensitive); 20 dispatcher integration tests
+  (private message fires/kind/title/body/self-suppressed/multiple; channel highlight
+  fires/kind/title/body/case-insensitive/no-match/substring-only/self-suppressed; action
+  PM/channel-highlight/no-match/self-suppressed; no registered nick suppresses; unknown
+  server suppresses).
+
+- ServerListDialog (ui/dialogs/ServerList.cs): completed all per-entry fields. Added
+  username override, realname override, and a full SASL section (Mechanism ComboBox with
+  None/SCRAM-SHA-512/SCRAM-SHA-256/EXTERNAL/PLAIN, Account, and SASL Password fields).
+  Added Connect Commands multi-line TextBox (one command per line, stored as List<string>
+  in ServerEntry.ConnectCommands). Section labels group Connection, Identity, SASL, and
+  Behavior fields. Edit form wrapped in ScrollViewer so all fields are reachable at any
+  window height. Added Import and Export buttons (bottom-left) using Avalonia
+  StorageProvider file picker (JSON Files filter); export writes the current list,
+  import appends parsed entries. Errors are surfaced via a modal dialog. The Blank()
+  helper converts whitespace-only text to null for optional string fields.
+- ServerListExport (storage/config/ServerListExport.cs): new static class for server list
+  serialization. ExportToJson serializes to a versioned JSON envelope with
+  datajack_server_list_version, exported_at, and servers array; all ServerEntry fields
+  including passwords are written verbatim (credential encryption is a future phase
+  feature). ImportFromJson deserializes, assigns a fresh Guid to each entry to avoid ID
+  collisions, and coerces null auto_join/connect_commands to empty lists and blank
+  encoding to UTF-8. Throws JsonException on invalid JSON and InvalidDataException when
+  the servers array is absent.
+- 24 new export/import tests (tests/DataJack.Core.Tests/ServerListExportTests.cs):
+  structural checks (valid JSON, format version key, exported_at, servers array count),
+  field preservation (network name, port/TLS, plaintext password, null password, SASL
+  credentials, null SASL, auto-join, connect commands, encoding), multiple entries,
+  round-trip full-field fidelity, fresh-ID assignment, unique IDs across entries,
+  sanitization of null auto_join / null connect_commands / empty encoding, error paths
+  (invalid JSON throws JsonException, missing servers key throws InvalidDataException).
+
+- Alias system (core/irc/AliasManager.cs): AliasManager stores user-defined command
+  aliases and expands them at dispatch time. Set(name, expansion) adds or replaces an
+  alias; Remove(name) removes one; GetAll() returns a snapshot. TryExpand(commandLine)
+  takes the raw text after the '/' (e.g. "weather Seattle"), matches the first word
+  against the alias map (case-insensitive), and returns the fully expanded command
+  string including a leading '/' (e.g. "/msg #weather Seattle") or null when no alias
+  matches. Substitution is single-pass to prevent double-substitution when arguments
+  themselves contain '%' tokens: %1..%9 expand to individual whitespace-delimited
+  arguments (empty string when the argument is absent), %* expands to all arguments
+  joined by a single space. HandleAlias(args) implements the /alias command: no args
+  lists all aliases alphabetically, one-word args shows a single alias definition,
+  "name expansion" adds or replaces. HandleUnalias(name) implements /unalias.
+  AliasesChanged event fires on Set and successful Remove so callers can persist to
+  config. Expansions stored with or without a leading '/' are both handled correctly.
+- AppConfig.Aliases (storage/config/Schema.cs): Dictionary<string, string> field added
+  to AppConfig; stores alias name -> expansion pairs. Schema version bumped from 1 to 2.
+- Config schema v2 migration (storage/config/Loader.cs): MigrateToV2 adds an empty
+  "aliases" JSON object to v1 config files and sets schema_version to 2.
+- 37 new alias tests (tests/DataJack.Core.Tests/AliasManagerTests.cs): constructor
+  initialization (3), Set/GetAll semantics (6), Remove (3), AliasesChanged event (3),
+  TryExpand null/no-match (2), %1 substitution (3), %2..%9 (2), %* (2), mixed tokens
+  (2), expansion without leading slash (1), case-insensitive lookup (2), HandleAlias
+  list/show/set (5), HandleUnalias (3).
+- 4 new config tests (tests/DataJack.Core.Tests/ConfigTests.cs): Default_Aliases_IsEmpty,
+  Default_Config_SchemaVersionIsTwo, Loader_RoundTrip_PreservesAliases,
+  Loader_MigratesV1ToV2_AddsEmptyAliases.
+
+- Phase 3 built-in command set (core/irc/CommandRouter.cs): 21 new methods on
+  IRCCommandRouter. Channel operator actions: KickAsync (KICK), BanAsync /
+  UnbanAsync (MODE +/-b), KickBanAsync (MODE +b then KICK in one call),
+  OpAsync / DeopAsync (MODE +/-o), VoiceAsync / DevoiceAsync (MODE +/-v),
+  ModeAsync (general MODE with optional parameter list). Channel info:
+  InviteAsync (INVITE), TopicAsync (TOPIC set or bare clear), NamesAsync
+  (NAMES), ListAsync (LIST with optional filter). User queries: WhoisAsync
+  (WHOIS), WhoAsync (WHO). User interaction: QueryAsync (PRIVMSG if message
+  provided, no-op if not), MeAsync (CTCP ACTION), CtcpAsync (arbitrary CTCP
+  request), PingAsync (CTCP PING with UTC millisecond timestamp). Away:
+  AwayAsync (AWAY with message or bare), BackAsync (bare AWAY). All new
+  methods follow the same argument-validation pattern as Phase 1 commands.
+- 40 new command router tests (tests/DataJack.Core.Tests/CommandRouterTests.cs)
+  covering exact wire format for every new command: kick with and without
+  reason, ban/unban mask, kickban two-line sequence, op/deop/voice/devoice,
+  mode with and without params, invite, topic set and clear, names with and
+  without channel, list with and without filter, whois, who with and without
+  mask, query with and without message, me CTCP ACTION, ctcp with and without
+  params, ping SOH-wrapped timestamp, away with message and bare, back; plus
+  validation-error assertions for invalid channel, nick, empty mask/command.
+
+- IRCStateUpdater (core/state/IRCStateUpdater.cs): one instance per server;
+  subscribes to all IRC protocol events on the event dispatch thread and drives
+  IRCStateModel.Apply to keep the snapshot tree current. Handles: connection
+  lifecycle (ConnectionAttempted creates server entry, ConnectionEstablished /
+  ConnectionClosed set IsConnected, WelcomeReceived sets RegisteredNick and
+  ConnectionClosed clears channels/caps and marks monitored nicks offline);
+  ISUPPORT token accumulation (merges across multiple 005 lines); IRCv3
+  active-cap set (CapabilityNegotiated replaces, ServerCapabilityChanged
+  adds/removes); nick changes (NickChanged renames local nick and updates all
+  channel user dictionary entries); channel membership (JoinedChannel/
+  PartedChannel/KickReceived for self or others, UserQuit across all channels);
+  topic (TopicChanged sets text + preserves existing setter/time, TopicWhoTime
+  updates setter and timestamp while preserving text, ChannelCreated stores
+  creation time); channel and prefix modes (OnChannelModeChanged parses MODE
+  strings using PREFIX and CHANMODES ISUPPORT tokens, applies prefix modes to
+  ChannelUser.ChannelModes and channel flags/params to ChannelState.Modes,
+  skips type-A list modes, falls back to IRC defaults when ISUPPORT is absent);
+  NAMES list (NamesListReceived replaces the Users dictionary, maps prefix
+  symbols to mode chars via PREFIX ISUPPORT, carries forward existing
+  user/host/account/realname); WHO and WHOIS backfill (WhoReplyEntry /
+  WhoIsReply update user/host/account/realname in all channels the nick
+  appears in); user metadata (UserHostChanged / UserAwayChanged /
+  UserAccountChanged / UserRealNameChanged each update the matching field in
+  all channel entries for that nick); MONITOR (MonitorStatusChanged adds or
+  updates MonitoredNick entries).
+- 40 new state updater tests (tests/DataJack.Core.Tests/IRCStateUpdaterTests.cs)
+  covering: connection lifecycle (5), ISUPPORT merge (2), capabilities (3),
+  nick changes (3), channel membership (7), topic (3), NAMES prefix mapping (1),
+  channel modes (3), WHO/WHOIS backfill (2), user metadata (5),
+  MONITOR (2), cross-server isolation (1), snapshot isolation (1) -- 32 total,
+  plus 8 additional edge-case assertions.
+
+- IRCv3 capability handlers (core/caps/handlers/): one file per capability.
+  CapabilityRegistry tracks active capabilities (from CapabilityNegotiated /
+  ServerCapabilityChanged) and the local nick (from WelcomeReceived /
+  NickChanged); active set is cleared on ConnectionEstablished so stale caps
+  are not visible during reconnect. ServerTimeHandler wraps the registry and
+  provides GetTimestamp(tags) which returns the parsed 'time' tag value when
+  server-time is active, falling back to DateTimeOffset.UtcNow otherwise.
+  EchoMessageHandler provides IsEchoedMessage(nick) for UI callers to detect
+  server echoes of the client's own messages when echo-message is active.
+  MonitorHandler manages the MONITOR watchlist: AddNickAsync / RemoveNickAsync
+  / ClearAsync send MONITOR +/-/C protocol lines when the monitor cap is active;
+  the watchlist is re-sent automatically on CapabilityNegotiated (covers
+  reconnects). BatchHandler subscribes to RawLineReceived and processes
+  batch-tagged lines directly (bypassing the main parser's async queue) to
+  guarantee correct accumulation order; BATCH +/- lines start and end batches;
+  PRIVMSG / ACTION / NOTICE lines tagged with batch= are accumulated per batch
+  ID; BatchReceived is emitted on BATCH -. LabeledResponseHandler tracks the
+  labeled-response cap and generates unique hex label strings via TryCreateLabel().
+- 31 new handler tests (tests/DataJack.Core.Tests/CapabilityHandlersTests.cs)
+  covering all handlers: registry cap tracking, local-nick tracking, nick-change
+  filtering, server-time timestamp selection, echo-message nick matching,
+  monitor send / dedup / clear / reconnect resubscription, batch accumulation
+  (PRIVMSG, ACTION, Notice, multi-batch, unknown-id guard), labeled-response
+  label generation.
+
+- IRCParser phase-3 numerics and IRCv3 protocol commands
+  (core/irc/Parser.cs): switched from Task.Run to a single sequential
+  channel drain loop (same pattern as CapabilityNegotiator) so multi-line
+  reply sequences (WHOIS, NAMES) are processed in TCP arrival order.
+  Added handlers for: 005 ISUPPORT token parsing, 311/312/317/318/330
+  WHOIS assembly (buffers partial replies, flushes on 318), 315 WHO end,
+  352 WHO reply, 322/323 LIST, 329 channel creation time, 332/333
+  TOPIC reply + TOPICWHOTIME, 353/366 NAMES accumulation and flush,
+  367/368 ban list, 730/731 MONITOR online/offline, MODE (channel and
+  user), AWAY (away-notify), CHGHOST, ACCOUNT, SETNAME.
+  TopicChanged.SetterNick changed to string? (null when setter is
+  unknown, e.g. 332 reply).
+- New event types (core/events/Types.cs): IsupportTokensReceived,
+  ChannelListEntry, ChannelListEnd, NamesEntry, NamesListReceived,
+  UserModeChanged, WhoEnd.
+- 21 new parser tests (tests/DataJack.Core.Tests/IrcParserTests.cs)
+  covering all new numeric and command handlers.
+
+
 - Configuration system (storage/config): AppConfig versioned schema (schema_version=1)
   with IdentitySettings, ServerEntry, SaslCredentials, AppearanceSettings, LoggingSettings,
   AdvancedSettings records. ConfigLoader reads/writes settings.json with atomic rename-on-save

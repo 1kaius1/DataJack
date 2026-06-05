@@ -8,24 +8,34 @@ namespace DataJack.Core.Storage.Config;
 
 /// <summary>The root application configuration object, versioned for forward migration.</summary>
 public sealed record AppConfig(
-    [property: JsonPropertyName("schema_version")] int SchemaVersion,
-    [property: JsonPropertyName("identity")]    IdentitySettings    Identity,
-    [property: JsonPropertyName("servers")]     List<ServerEntry>   Servers,
-    [property: JsonPropertyName("appearance")]  AppearanceSettings  Appearance,
-    [property: JsonPropertyName("logging")]     LoggingSettings     Logging,
-    [property: JsonPropertyName("advanced")]    AdvancedSettings    Advanced)
+    [property: JsonPropertyName("schema_version")]     int                        SchemaVersion,
+    [property: JsonPropertyName("identity")]           IdentitySettings           Identity,
+    [property: JsonPropertyName("servers")]            List<ServerEntry>          Servers,
+    [property: JsonPropertyName("appearance")]         AppearanceSettings         Appearance,
+    [property: JsonPropertyName("logging")]            LoggingSettings            Logging,
+    [property: JsonPropertyName("advanced")]           AdvancedSettings           Advanced,
+    [property: JsonPropertyName("aliases")]            Dictionary<string, string> Aliases,
+    [property: JsonPropertyName("highlight_patterns")] List<HighlightPattern>     HighlightPatterns,
+    [property: JsonPropertyName("archive")]            ArchiveSettings            Archive,
+    [property: JsonPropertyName("dcc")]                DccSettings                Dcc,
+    [property: JsonPropertyName("away")]               AwaySettings               Away)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 9;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
-        SchemaVersion: CurrentVersion,
-        Identity:      IdentitySettings.Default(),
-        Servers:       new List<ServerEntry>(),
-        Appearance:    AppearanceSettings.Default(),
-        Logging:       LoggingSettings.Default(),
-        Advanced:      AdvancedSettings.Default());
+        SchemaVersion:     CurrentVersion,
+        Identity:          IdentitySettings.Default(),
+        Servers:           new List<ServerEntry>(),
+        Appearance:        AppearanceSettings.Default(),
+        Logging:           LoggingSettings.Default(),
+        Advanced:          AdvancedSettings.Default(),
+        Aliases:           new Dictionary<string, string>(),
+        HighlightPatterns: new List<HighlightPattern>(),
+        Archive:           ArchiveSettings.Default(),
+        Dcc:               DccSettings.Default(),
+        Away:              AwaySettings.Default());
 }
 
 /// <summary>User identity settings. All fields may be overridden per-server.</summary>
@@ -57,7 +67,8 @@ public sealed record ServerEntry(
     [property: JsonPropertyName("auto_join")]        List<string>     AutoJoinChannels,
     [property: JsonPropertyName("auto_connect")]     bool             AutoConnect,
     [property: JsonPropertyName("encoding")]         string           Encoding,
-    [property: JsonPropertyName("connect_commands")] List<string>     ConnectCommands)
+    [property: JsonPropertyName("connect_commands")] List<string>     ConnectCommands,
+    [property: JsonPropertyName("proxy")]             ProxySettings?   Proxy = null)
 {
     /// <summary>Convenience factory for a new blank server entry.</summary>
     public static ServerEntry New(string networkName, string address) => new(
@@ -74,8 +85,16 @@ public sealed record ServerEntry(
         AutoJoinChannels: new List<string>(),
         AutoConnect:      false,
         Encoding:         "UTF-8",
-        ConnectCommands:  new List<string>());
+        ConnectCommands:  new List<string>(),
+        Proxy:            null);
 }
+
+/// <summary>SOCKS5 proxy configuration for a server connection.</summary>
+public sealed record ProxySettings(
+    [property: JsonPropertyName("host")]     string  Host,
+    [property: JsonPropertyName("port")]     int     Port,
+    [property: JsonPropertyName("username")] string? Username = null,
+    [property: JsonPropertyName("password")] string? Password = null);
 
 /// <summary>SASL credentials for a server connection.</summary>
 public sealed record SaslCredentials(
@@ -90,7 +109,12 @@ public sealed record AppearanceSettings(
     [property: JsonPropertyName("font_size")]         double? FontSize,
     [property: JsonPropertyName("show_timestamps")]   bool    ShowTimestamps,
     [property: JsonPropertyName("timestamp_format")]  string  TimestampFormat,
-    [property: JsonPropertyName("scrollback_limit")]  int     ScrollbackLimit)
+    [property: JsonPropertyName("scrollback_limit")]  int     ScrollbackLimit,
+    /// <summary>
+    /// Navigation panel layout. <c>"tabs"</c> = HexChat-style horizontal tab bar
+    /// (default). <c>"tree"</c> = mIRC-style vertical server/channel tree sidebar.
+    /// </summary>
+    [property: JsonPropertyName("layout_mode")]       string  LayoutMode)
 {
     internal static AppearanceSettings Default() => new(
         ThemeName:       "default",
@@ -98,7 +122,8 @@ public sealed record AppearanceSettings(
         FontSize:        null,
         ShowTimestamps:  true,
         TimestampFormat: "HH:mm",
-        ScrollbackLimit: 5000);
+        ScrollbackLimit: 5000,
+        LayoutMode:      "tabs");
 }
 
 /// <summary>Log file settings.</summary>
@@ -109,18 +134,106 @@ public sealed record LoggingSettings(
     internal static LoggingSettings Default() => new(Enabled: true, LogDirectory: null);
 }
 
+// ---------------------------------------------------------------------------
+// Highlight pattern types
+// ---------------------------------------------------------------------------
+
+/// <summary>Determines how a highlight pattern expression is interpreted.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum HighlightPatternKind
+{
+    /// <summary>Case-insensitive (by default) substring match.</summary>
+    Literal,
+    /// <summary>Glob-style pattern: <c>*</c> matches any sequence, <c>?</c> matches one character. Always case-insensitive.</summary>
+    Wildcard,
+    /// <summary>Full .NET regular expression. Case sensitivity is controlled by <see cref="HighlightPattern.CaseSensitive"/>.</summary>
+    Regex,
+}
+
+/// <summary>
+/// One user-configured highlight pattern. The current nick is always an additional implicit
+/// pattern; it never needs to be added here.
+/// </summary>
+public sealed record HighlightPattern(
+    [property: JsonPropertyName("expression")]     string              Expression,
+    [property: JsonPropertyName("kind")]           HighlightPatternKind Kind,
+    [property: JsonPropertyName("case_sensitive")] bool                CaseSensitive = false);
+
+/// <summary>Settings for automatic log file rotation and gzip compression.</summary>
+public sealed record ArchiveSettings(
+    [property: JsonPropertyName("enabled")]      bool Enabled,
+    [property: JsonPropertyName("max_age_days")] int  MaxAgeDays)
+{
+    /// <summary>Default: enabled, archive files older than 90 days.</summary>
+    internal static ArchiveSettings Default() => new(Enabled: true, MaxAgeDays: 90);
+}
+
+/// <summary>DCC file transfer configuration. See ARCHITECTURE.md §11.</summary>
+public sealed record DccSettings(
+    /// <summary>
+    /// Directory where received files are saved. When null the platform Downloads folder is used
+    /// (<c>~/Downloads</c> on Linux/macOS, <c>%USERPROFILE%\Downloads</c> on Windows).
+    /// </summary>
+    [property: JsonPropertyName("download_directory")] string? DownloadDirectory,
+    /// <summary>
+    /// When true, incoming DCC SEND offers are automatically accepted without prompting.
+    /// Off by default — incoming offers always require explicit user confirmation.
+    /// </summary>
+    [property: JsonPropertyName("auto_accept")]        bool    AutoAccept,
+    /// <summary>
+    /// Maximum size in megabytes of an auto-accepted file. 0 means no limit.
+    /// Only relevant when <see cref="AutoAccept"/> is true.
+    /// </summary>
+    [property: JsonPropertyName("max_file_size_mb")]   int     MaxFileSizeMb)
+{
+    /// <summary>Factory for safe default DCC settings: no auto-accept, platform download directory.</summary>
+    internal static DccSettings Default() => new(
+        DownloadDirectory: null,
+        AutoAccept:        false,
+        MaxFileSizeMb:     0);
+}
+
+/// <summary>Away status message and auto-away-on-idle configuration.</summary>
+public sealed record AwaySettings(
+    /// <summary>Message broadcast with the AWAY command. Shown to users who WHOIS or message the away user.</summary>
+    [property: JsonPropertyName("message")]              string AwayMessage,
+    /// <summary>When true, the client sends AWAY automatically after <see cref="AutoAwayDelaySec"/> seconds of input inactivity.</summary>
+    [property: JsonPropertyName("auto_away_enabled")]    bool   AutoAwayEnabled,
+    /// <summary>Seconds of input inactivity before auto-away triggers. Ignored when <see cref="AutoAwayEnabled"/> is false.</summary>
+    [property: JsonPropertyName("auto_away_delay_sec")]  int    AutoAwayDelaySec)
+{
+    /// <summary>Default: message "Away", auto-away off, 600-second (10-minute) idle delay.</summary>
+    internal static AwaySettings Default() => new(
+        AwayMessage:      "Away",
+        AutoAwayEnabled:  false,
+        AutoAwayDelaySec: 600);
+}
+
 /// <summary>Advanced tuning settings for flood control and reconnect behavior.</summary>
 public sealed record AdvancedSettings(
-    [property: JsonPropertyName("flood_token_capacity")]         double FloodTokenCapacity,
-    [property: JsonPropertyName("flood_drain_rate")]             double FloodDrainRate,
-    [property: JsonPropertyName("reconnect_initial_delay_sec")]  int    ReconnectInitialDelaySec,
-    [property: JsonPropertyName("reconnect_max_delay_sec")]      int    ReconnectMaxDelaySec,
-    [property: JsonPropertyName("reconnect_max_attempts")]       int    ReconnectMaxAttempts)
+    [property: JsonPropertyName("flood_token_capacity")]         double  FloodTokenCapacity,
+    [property: JsonPropertyName("flood_drain_rate")]             double  FloodDrainRate,
+    [property: JsonPropertyName("reconnect_initial_delay_sec")]  int     ReconnectInitialDelaySec,
+    [property: JsonPropertyName("reconnect_max_delay_sec")]      int     ReconnectMaxDelaySec,
+    [property: JsonPropertyName("reconnect_max_attempts")]       int     ReconnectMaxAttempts,
+    /// <summary>
+    /// When non-null, raw IRC I/O and connection lifecycle events are appended to this file.
+    /// PASS and AUTHENTICATE credential lines are redacted. Set to null to disable.
+    /// </summary>
+    [property: JsonPropertyName("log_debug")]                    string? DebugLogPath,
+    /// <summary>
+    /// When true, the client automatically reconnects after an unexpected disconnect.
+    /// Reconnection is never attempted after a voluntary /quit.
+    /// Off by default; configure <c>reconnect_max_attempts</c> to limit retries.
+    /// </summary>
+    [property: JsonPropertyName("reconnect_enabled")]            bool    ReconnectEnabled)
 {
     internal static AdvancedSettings Default() => new(
         FloodTokenCapacity:         10.0,
         FloodDrainRate:             2.0,
         ReconnectInitialDelaySec:   2,
         ReconnectMaxDelaySec:       300,
-        ReconnectMaxAttempts:       0);
+        ReconnectMaxAttempts:       0,
+        DebugLogPath:               null,
+        ReconnectEnabled:           false);
 }

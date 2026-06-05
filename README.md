@@ -22,7 +22,7 @@ DataJack is a cross-platform IRC client built for power users. It provides the s
 
 ## Features
 
-- **Multi-server** - connect to any number of IRC networks simultaneously, each in its own tree or tab
+- **Multi-server** - connect to any number of IRC networks simultaneously, with a HexChat-style tab bar or a mIRC-style tree sidebar (switch with `/layout tree` or `/layout tabs`)
 - **IRCv3** - full capability negotiation: `message-tags`, `batch`, `labeled-response`, `chathistory`, `server-time`, `away-notify`, `monitor`, `sasl`, and more
 - **SASL authentication** - SCRAM-SHA-512, SCRAM-SHA-256, EXTERNAL (client certificates), and PLAIN (TLS-only)
 - **Lua scripting** - sandboxed MoonSharp engine; hook events, send commands, register custom `/commands`, automate anything

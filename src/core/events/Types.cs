@@ -98,6 +98,11 @@ public readonly record struct BatchReceived(
 // Registration events
 // ---------------------------------------------------------------------------
 
+/// <summary>ISUPPORT tokens (005) received from the server during registration.</summary>
+public readonly record struct IsupportTokensReceived(
+    string Server,
+    IReadOnlyDictionary<string, string> Tokens);
+
 /// <summary>The server accepted registration and assigned a nick (numeric 001).</summary>
 public readonly record struct WelcomeReceived(string Server, string Nick);
 
@@ -161,7 +166,7 @@ public readonly record struct TopicChanged(
     string Server,
     string Channel,
     string NewTopic,
-    string SetterNick);
+    string? SetterNick);
 
 /// <summary>An INVITE arrived for the local user.</summary>
 public readonly record struct InviteReceived(string Server, string Channel, string FromNick);
@@ -183,6 +188,28 @@ public readonly record struct ChannelModeChanged(
 
 /// <summary>The channel creation time was received (numeric 329).</summary>
 public readonly record struct ChannelCreated(string Server, string Channel, DateTimeOffset CreatedAt);
+
+/// <summary>One entry from an RPL_LIST (322) response.</summary>
+public readonly record struct ChannelListEntry(
+    string Server,
+    string Channel,
+    int UserCount,
+    string Topic);
+
+/// <summary>The server finished sending its channel list (RPL_LISTEND, 323).</summary>
+public readonly record struct ChannelListEnd(string Server);
+
+/// <summary>One nick entry from a NAMES reply, carrying the nick and its mode prefix chars.</summary>
+public sealed record NamesEntry(string Nick, IReadOnlyList<char> Prefixes);
+
+/// <summary>
+/// A complete NAMES list for a channel, assembled from RPL_NAMREPLY (353) lines
+/// and emitted when RPL_ENDOFNAMES (366) is received.
+/// </summary>
+public readonly record struct NamesListReceived(
+    string Server,
+    string Channel,
+    IReadOnlyList<NamesEntry> Users);
 
 // ---------------------------------------------------------------------------
 // User events
@@ -212,6 +239,9 @@ public readonly record struct UserRealNameChanged(string Server, string Nick, st
 /// <summary>A MONITOR online/offline reply was received (730/731 numerics).</summary>
 public readonly record struct MonitorStatusChanged(string Server, string Nick, bool IsOnline);
 
+/// <summary>A user-level MODE change was applied to a nick (not a channel).</summary>
+public readonly record struct UserModeChanged(string Server, string Nick, string ModeString);
+
 /// <summary>One entry from a WHO reply (numeric 352).</summary>
 public readonly record struct WhoReplyEntry(
     string Server,
@@ -235,6 +265,9 @@ public readonly record struct WhoIsReply(
 
 /// <summary>The WHOIS reply sequence is complete (numeric 318).</summary>
 public readonly record struct WhoIsEnd(string Server, string Nick);
+
+/// <summary>The WHO reply sequence for a target is complete (RPL_ENDOFWHO, 315).</summary>
+public readonly record struct WhoEnd(string Server, string Target);
 
 /// <summary>One entry from a ban list (numeric 367).</summary>
 public readonly record struct BanListEntry(
@@ -273,3 +306,79 @@ public readonly record struct PrivilegeError(string Server, string Command, stri
 
 /// <summary>A script handler invocation was dropped because the script queue was full.</summary>
 public readonly record struct ScriptInvocationDropped(string ScriptName, string EventType);
+
+// ---------------------------------------------------------------------------
+// DCC events — see ARCHITECTURE.md §11
+// ---------------------------------------------------------------------------
+
+/// <summary>Direction and type of a DCC session.</summary>
+public enum DccTransferType
+{
+    /// <summary>Outbound: we are sending the file.</summary>
+    Send,
+    /// <summary>Inbound: we are receiving the file.</summary>
+    Receive,
+    /// <summary>Direct client-to-client chat session (Phase 4).</summary>
+    Chat,
+}
+
+/// <summary>Lifecycle status of a DCC session.</summary>
+public enum DccSessionStatus
+{
+    /// <summary>Offer received or sent; awaiting user acceptance or peer connection.</summary>
+    Pending,
+    /// <summary>Transfer is in progress.</summary>
+    Active,
+    /// <summary>Transfer paused (resume is Phase 4).</summary>
+    Paused,
+    /// <summary>Transfer completed successfully.</summary>
+    Completed,
+    /// <summary>Transfer failed or was rejected.</summary>
+    Failed,
+}
+
+/// <summary>
+/// A DCC SEND offer arrived from a peer. The user must explicitly accept; no auto-accept
+/// occurs unless configured. <see cref="IsExecutable"/> is true when the filename has a
+/// potentially dangerous extension and warrants an additional confirmation prompt.
+/// </summary>
+public readonly record struct DccOfferReceived(
+    string          Server,
+    Guid            SessionId,
+    string          PeerNick,
+    DccTransferType Type,
+    string?         Filename,
+    long?           FileSize,
+    string          PeerAddress,
+    int             PeerPort,
+    bool            IsExecutable);
+
+/// <summary>We sent a DCC SEND offer to a peer and are waiting for them to connect.</summary>
+public readonly record struct DccOfferSent(
+    string          Server,
+    Guid            SessionId,
+    string          PeerNick,
+    DccTransferType Type,
+    string?         Filename);
+
+/// <summary>A DCC transfer connection was established and I/O has begun.</summary>
+public readonly record struct DccStarted(string Server, Guid SessionId);
+
+/// <summary>Periodic progress update emitted during an active DCC file transfer.</summary>
+public readonly record struct DccProgress(
+    string Server,
+    Guid   SessionId,
+    long   BytesTransferred,
+    double TransferRate);
+
+/// <summary>A DCC file transfer completed successfully.</summary>
+public readonly record struct DccCompleted(string Server, Guid SessionId, long BytesTransferred);
+
+/// <summary>A DCC transfer or offer failed or was rejected.</summary>
+public readonly record struct DccFailed(string Server, Guid SessionId, string Reason);
+
+/// <summary>A message arrived over a DCC CHAT connection (Phase 4).</summary>
+public readonly record struct DccChatMessageReceived(string Server, Guid SessionId, string Text);
+
+/// <summary>A message was sent over a DCC CHAT connection (Phase 4).</summary>
+public readonly record struct DccChatMessageSent(string Server, Guid SessionId, string Text);
