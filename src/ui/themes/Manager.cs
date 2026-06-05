@@ -110,6 +110,21 @@ public sealed class ThemeManager : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // Config overrides
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Silently replaces the active theme's timestamp format string with a value
+    /// derived from the application config (e.g. for the 12/24-hour toggle).
+    /// Does not fire <see cref="ThemeChanged"/>; the caller is responsible for
+    /// triggering a redraw via <c>ApplyTheme</c> if messages are already displayed.
+    /// </summary>
+    public void SetTimestampFormat(string format)
+    {
+        Theme = Theme with { TimestampFormat = format };
+    }
+
+    // ---------------------------------------------------------------------------
     // Color helpers
     // ---------------------------------------------------------------------------
 

@@ -21,7 +21,7 @@ public sealed record AppConfig(
     [property: JsonPropertyName("away")]               AwaySettings               Away)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 10;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -111,19 +111,26 @@ public sealed record AppearanceSettings(
     [property: JsonPropertyName("timestamp_format")]  string  TimestampFormat,
     [property: JsonPropertyName("scrollback_limit")]  int     ScrollbackLimit,
     /// <summary>
-    /// Navigation panel layout. <c>"tabs"</c> = HexChat-style horizontal tab bar
-    /// (default). <c>"tree"</c> = mIRC-style vertical server/channel tree sidebar.
+    /// Navigation panel layout. <c>"tree"</c> = mIRC-style vertical server/channel tree
+    /// sidebar (default). <c>"tabs"</c> = HexChat-style horizontal tab bar.
     /// </summary>
-    [property: JsonPropertyName("layout_mode")]       string  LayoutMode)
+    [property: JsonPropertyName("layout_mode")]       string  LayoutMode,
+    /// <summary>
+    /// When <see langword="true"/> (default), timestamps are rendered in 24-hour format
+    /// using <see cref="TimestampFormat"/> as-is. When <see langword="false"/>, "HH" is
+    /// replaced with "hh" and " tt" (AM/PM) is appended, producing 12-hour display.
+    /// </summary>
+    [property: JsonPropertyName("use_24_hour_time")]  bool    Use24HourTime)
 {
     internal static AppearanceSettings Default() => new(
         ThemeName:       "default",
         FontFamily:      null,
         FontSize:        null,
         ShowTimestamps:  true,
-        TimestampFormat: "HH:mm",
+        TimestampFormat: "HH:mm:ss",
         ScrollbackLimit: 5000,
-        LayoutMode:      "tabs");
+        LayoutMode:      "tree",
+        Use24HourTime:   true);
 }
 
 /// <summary>Log file settings.</summary>

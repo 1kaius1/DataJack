@@ -119,6 +119,8 @@ public sealed class ConfigLoader
         // v9 adds "reconnect_enabled" to the "advanced" object; off by default so that
         // existing users do not suddenly see automatic reconnection start happening.
         9 => MigrateToV9(node),
+        // v10 adds "use_24_hour_time" to the "appearance" object for 12/24-hour timestamp toggle.
+        10 => MigrateToV10(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -177,7 +179,7 @@ public sealed class ConfigLoader
             root["appearance"] is System.Text.Json.Nodes.JsonObject appearance &&
             appearance["layout_mode"] is null)
         {
-            appearance["layout_mode"] = "tabs";
+            appearance["layout_mode"] = "tree";
         }
 
         node["schema_version"] = 6;
@@ -223,6 +225,19 @@ public sealed class ConfigLoader
         }
 
         node["schema_version"] = 9;
+        return node;
+    }
+
+    private static JsonNode MigrateToV10(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject root &&
+            root["appearance"] is System.Text.Json.Nodes.JsonObject appearance &&
+            appearance["use_24_hour_time"] is null)
+        {
+            appearance["use_24_hour_time"] = true;
+        }
+
+        node["schema_version"] = 10;
         return node;
     }
 

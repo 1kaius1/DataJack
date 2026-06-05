@@ -661,7 +661,10 @@ public sealed class DccReceiverTests
 
         string outPath = Path.GetTempFileName();
         var progressReports = new List<(long bytes, double rate)>();
-        var progress = new Progress<(long, double)>(p => progressReports.Add(p));
+        // SyncProgress invokes the callback synchronously so reports are guaranteed
+        // to be present when assertions run (Progress<T> queues to ThreadPool when
+        // there is no SynchronizationContext, causing a race with the assertion).
+        var progress = new SyncProgress<(long, double)>(p => progressReports.Add(p));
 
         try
         {
@@ -1062,11 +1065,8 @@ public sealed class DccEngineResumeTests : IAsyncDisposable
             $"SEND resume.txt 2130706433 5000 {fullContent.Length}"));
         var offer = await offerTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Start the accept in the background (it will pause at the RESUME handshake).
-        var acceptTask = _engine.AcceptReceiveAsync(offer.SessionId);
-
-        // Wait for AcceptReceiveAsync to actually send the DCC RESUME CTCP line rather
-        // than using a fixed delay (which races under parallel test load).
+        // Subscribe before starting AcceptReceiveAsync so the RESUME CTCP line cannot
+        // be sent before the handler is registered (avoids a missed-event race).
         var resumeSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Action<RawLineSent> onSent = e =>
         {
@@ -1074,6 +1074,10 @@ public sealed class DccEngineResumeTests : IAsyncDisposable
                 resumeSent.TrySetResult();
         };
         _dispatcher.Subscribe(onSent);
+
+        // Start the accept in the background (it will pause at the RESUME handshake).
+        var acceptTask = _engine.AcceptReceiveAsync(offer.SessionId);
+
         await resumeSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
         _dispatcher.Unsubscribe(onSent);
 
@@ -1091,6 +1095,20 @@ public sealed class DccEngineResumeTests : IAsyncDisposable
         await ircConn.DisposeAsync();
         Directory.Delete(tempDir, recursive: true);
     }
+}
+
+// ---------------------------------------------------------------------------
+// SyncProgress: synchronous IProgress<T> for tests.
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Invokes the report callback synchronously on the caller's thread.
+/// Avoids the ThreadPool dispatch that Progress&lt;T&gt; uses when there is no
+/// SynchronizationContext, which can cause callbacks to arrive after assertions run.
+/// </summary>
+internal sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }
 
 // ---------------------------------------------------------------------------

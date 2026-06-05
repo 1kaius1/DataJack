@@ -71,7 +71,7 @@ public sealed class LayoutManager : Grid, IDisposable
 
     // Layout state
     private readonly ColumnDefinition _sidebarColumn;
-    private string   _layoutMode = "tabs";
+    private string   _layoutMode = "tree";
     private IBuffer? _active;
     private bool     _disposed;
 
@@ -109,13 +109,13 @@ public sealed class LayoutManager : Grid, IDisposable
     /// <param name="buffers">Source of buffer lifecycle events.</param>
     /// <param name="theme">Theme source; used for all chrome colors.</param>
     /// <param name="initialLayoutMode">
-    /// Starting mode: <c>"tabs"</c> (default) or <c>"tree"</c>.
+    /// Starting mode: <c>"tree"</c> (default) or <c>"tabs"</c>.
     /// Loaded from <see cref="DataJack.Core.Storage.Config.AppearanceSettings.LayoutMode"/>.
     /// </param>
     public LayoutManager(
         BufferManager buffers,
         ThemeManager  theme,
-        string        initialLayoutMode = "tabs")
+        string        initialLayoutMode = "tree")
     {
         _buffers = buffers;
         _theme   = theme;

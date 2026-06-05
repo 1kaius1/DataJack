@@ -273,10 +273,10 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsNine()
+    public void Default_Config_SchemaVersionIsTen()
     {
-        Assert.Equal(9, AppConfig.CurrentVersion);
-        Assert.Equal(9, AppConfig.Default().SchemaVersion);
+        Assert.Equal(10, AppConfig.CurrentVersion);
+        Assert.Equal(10, AppConfig.Default().SchemaVersion);
     }
 
     [Fact]
@@ -302,10 +302,22 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Appearance_LayoutModeIsTabs()
+    public void Default_Appearance_LayoutModeIsTree()
     {
         var config = AppConfig.Default();
-        Assert.Equal("tabs", config.Appearance.LayoutMode);
+        Assert.Equal("tree", config.Appearance.LayoutMode);
+    }
+
+    [Fact]
+    public void Default_Appearance_TimestampFormat_IsHHmmss()
+    {
+        Assert.Equal("HH:mm:ss", AppConfig.Default().Appearance.TimestampFormat);
+    }
+
+    [Fact]
+    public void Default_Appearance_Use24HourTime_IsTrue()
+    {
+        Assert.True(AppConfig.Default().Appearance.Use24HourTime);
     }
 
     [Fact]
@@ -369,7 +381,7 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.Equal(90, loader.Config.Archive.MaxAgeDays);
         // v4->v5 and v5->v6 also run.
         Assert.NotNull(loader.Config.Dcc);
-        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
+        Assert.Equal("tree", loader.Config.Appearance.LayoutMode);
     }
 
     [Fact]
@@ -414,7 +426,7 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.Null(loader.Config.Dcc.DownloadDirectory);
         Assert.False(loader.Config.Dcc.AutoAccept);
         Assert.Equal(0, loader.Config.Dcc.MaxFileSizeMb);
-        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
+        Assert.Equal("tree", loader.Config.Appearance.LayoutMode);
     }
 
     [Fact]
@@ -456,7 +468,7 @@ public sealed class ConfigTests : IAsyncDisposable
 
         // v5 → v6 → v7 all run; result is always current version.
         Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
-        Assert.Equal("tabs", loader.Config.Appearance.LayoutMode);
+        Assert.Equal("tree", loader.Config.Appearance.LayoutMode);
     }
 
     [Fact]
@@ -744,6 +756,74 @@ public sealed class ConfigTests : IAsyncDisposable
         await loader2.LoadAsync();
 
         Assert.Equal("/tmp/datajack-debug.log", loader2.Config.Advanced.DebugLogPath);
+    }
+
+    // ---------------------------------------------------------------------------
+    // v8 → v9 migration: use_24_hour_time in appearance
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Loader_MigratesV9ToV10_AddsUse24HourTime()
+    {
+        string path = Path.Combine(_tempDir, "settings_v9.json");
+
+        string v9Json = """
+            {
+              "schema_version": 9,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm:ss",
+                "scrollback_limit": 5000,
+                "layout_mode": "tree"
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0,
+                "log_debug": null,
+                "reconnect_enabled": false
+              },
+              "aliases": {},
+              "highlight_patterns": [],
+              "archive": { "enabled": true, "max_age_days": 90 },
+              "dcc": { "download_directory": null, "auto_accept": false, "max_file_size_mb": 0 },
+              "away": { "message": "Away", "auto_away_enabled": false, "auto_away_delay_sec": 600 }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v9Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
+        Assert.True(loader.Config.Appearance.Use24HourTime);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesUse24HourTime()
+    {
+        string path = Path.Combine(_tempDir, "settings_24h.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Appearance = loader.Config.Appearance with { Use24HourTime = false },
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.False(loader2.Config.Appearance.Use24HourTime);
     }
 
     [Fact]
