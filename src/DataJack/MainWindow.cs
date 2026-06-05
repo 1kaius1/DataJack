@@ -58,9 +58,14 @@ internal sealed class MainWindow : Window
         _layout.CommandIssued += OnCommandIssued;
         _layout.MessageIssued += OnMessageIssued;
 
-        // Hot-reload the UI when the theme changes.
+        // Hot-reload the UI when the theme changes. Re-apply the config-level timestamp
+        // override first so a theme file reload does not clobber the 12/24h setting.
         _themeManager.ThemeChanged += _ =>
-            Avalonia.Threading.Dispatcher.UIThread.Post(ApplyTheme);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ApplyTimestampFormatOverride();
+                ApplyTheme();
+            });
 
         // Load config and theme asynchronously after the window is shown.
         Opened += async (_, _) => await BootstrapAsync();
@@ -79,6 +84,7 @@ internal sealed class MainWindow : Window
             await _configLoader.LoadAsync();
 
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
+            ApplyTimestampFormatOverride();
             _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
             _layout.SetSpellCheckService(_spellService);
 
@@ -140,6 +146,16 @@ internal sealed class MainWindow : Window
         Background = new Avalonia.Media.SolidColorBrush(
             ThemeManager.ParseHex(chrome.Background));
     }
+
+    private void ApplyTimestampFormatOverride()
+    {
+        var appearance = _configLoader.Config.Appearance;
+        _themeManager.SetTimestampFormat(
+            ComputeTimestampFormat(appearance.TimestampFormat, appearance.Use24HourTime));
+    }
+
+    private static string ComputeTimestampFormat(string baseFormat, bool use24Hour) =>
+        use24Hour ? baseFormat : baseFormat.Replace("HH", "hh") + " tt";
 
     // ---------------------------------------------------------------------------
     // IRC command routing
