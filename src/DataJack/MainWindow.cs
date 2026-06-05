@@ -288,7 +288,12 @@ internal sealed class MainWindow : Window
                 break;
 
             case "QUIT":
+                // Send QUIT first so the server sees the reason, then remove and dispose
+                // the session immediately — this cancels the ReconnectController CTS before
+                // ConnectionClosed fires, so voluntary /quit never triggers a reconnect.
                 await session.Router.QuitAsync(args.Length > 0 ? args : null);
+                if (_sessions.TryRemove(sourceBuffer?.Server ?? string.Empty, out var quitSession))
+                    await quitSession.DisposeAsync();
                 break;
 
             case "RAW":

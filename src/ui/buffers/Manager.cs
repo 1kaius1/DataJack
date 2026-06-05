@@ -55,19 +55,43 @@ public sealed class BufferManager : IDisposable
         // Subscribe to the IRC events that drive buffer creation and message routing.
         _dispatcher.Subscribe<ConnectionEstablished>(OnConnectionEstablished);
         _dispatcher.Subscribe<ConnectionClosed>(OnConnectionClosed);
+        _dispatcher.Subscribe<ConnectionFailed>(OnConnectionFailed);
+        _dispatcher.Subscribe<ReconnectScheduled>(OnReconnectScheduled);
+        _dispatcher.Subscribe<ReconnectSucceeded>(OnReconnectSucceeded);
+        _dispatcher.Subscribe<ReconnectFailed>(OnReconnectFailed);
         _dispatcher.Subscribe<WelcomeReceived>(OnWelcomeReceived);
         _dispatcher.Subscribe<MOTDReceived>(OnMotdReceived);
         _dispatcher.Subscribe<MOTDEnd>(OnMotdEnd);
+        _dispatcher.Subscribe<SASLStarted>(OnSaslStarted);
+        _dispatcher.Subscribe<SASLSucceeded>(OnSaslSucceeded);
+        _dispatcher.Subscribe<SASLFailed>(OnSaslFailed);
         _dispatcher.Subscribe<JoinedChannel>(OnJoinedChannel);
         _dispatcher.Subscribe<PartedChannel>(OnPartedChannel);
         _dispatcher.Subscribe<KickReceived>(OnKickReceived);
+        _dispatcher.Subscribe<NamesListReceived>(OnNamesListReceived);
+        _dispatcher.Subscribe<ChannelModeChanged>(OnChannelModeChanged);
+        _dispatcher.Subscribe<UserModeChanged>(OnUserModeChanged);
+        _dispatcher.Subscribe<TopicChanged>(OnTopicChanged);
+        _dispatcher.Subscribe<InviteReceived>(OnInviteReceived);
         _dispatcher.Subscribe<MessageReceived>(OnMessageReceived);
         _dispatcher.Subscribe<ActionReceived>(OnActionReceived);
         _dispatcher.Subscribe<NoticeReceived>(OnNoticeReceived);
         _dispatcher.Subscribe<ServerNoticeReceived>(OnServerNoticeReceived);
+        _dispatcher.Subscribe<WallopsReceived>(OnWallopsReceived);
+        _dispatcher.Subscribe<CtcpRequest>(OnCtcpRequest);
+        _dispatcher.Subscribe<CtcpReply>(OnCtcpReply);
         _dispatcher.Subscribe<NickChanged>(OnNickChanged);
+        _dispatcher.Subscribe<NickInUse>(OnNickInUse);
         _dispatcher.Subscribe<UserQuit>(OnUserQuit);
-        _dispatcher.Subscribe<TopicChanged>(OnTopicChanged);
+        _dispatcher.Subscribe<WhoIsReply>(OnWhoIsReply);
+        _dispatcher.Subscribe<WhoIsEnd>(OnWhoIsEnd);
+        _dispatcher.Subscribe<WhoReplyEntry>(OnWhoReplyEntry);
+        _dispatcher.Subscribe<WhoEnd>(OnWhoEnd);
+        _dispatcher.Subscribe<ChannelListEntry>(OnChannelListEntry);
+        _dispatcher.Subscribe<ChannelListEnd>(OnChannelListEnd);
+        _dispatcher.Subscribe<BanListEntry>(OnBanListEntry);
+        _dispatcher.Subscribe<BanListEnd>(OnBanListEnd);
+        _dispatcher.Subscribe<PrivilegeError>(OnPrivilegeError);
         _dispatcher.Subscribe<RawLineReceived>(OnRawLineReceived);
         _dispatcher.Subscribe<RawLineSent>(OnRawLineSent);
         _dispatcher.Subscribe<ErrorReceived>(OnErrorReceived);
@@ -134,7 +158,7 @@ public sealed class BufferManager : IDisposable
     }
 
     // ---------------------------------------------------------------------------
-    // Event handlers
+    // Connection events
     // ---------------------------------------------------------------------------
 
     private void OnConnectionEstablished(ConnectionEstablished e)
@@ -150,6 +174,35 @@ public sealed class BufferManager : IDisposable
         string reason = e.Reason is null ? string.Empty : $": {e.Reason}";
         buf.AddMessage(Now(MessageKind.Error, $"Disconnected{reason}"));
     }
+
+    private void OnConnectionFailed(ConnectionFailed e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Error, $"Connection failed: {e.Reason}"));
+    }
+
+    private void OnReconnectScheduled(ReconnectScheduled e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info,
+                $"Reconnect attempt {e.AttemptNumber} in {e.DelaySeconds:F1}s..."));
+    }
+
+    private void OnReconnectSucceeded(ReconnectSucceeded e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, "Reconnected."));
+    }
+
+    private void OnReconnectFailed(ReconnectFailed e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Error, $"Reconnect failed: {e.Reason}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Registration events
+    // ---------------------------------------------------------------------------
 
     private void OnWelcomeReceived(WelcomeReceived e)
     {
@@ -168,10 +221,34 @@ public sealed class BufferManager : IDisposable
         GetOrCreateServerStatus(e.Server);
     }
 
+    private void OnSaslStarted(SASLStarted e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, $"SASL: authenticating with {e.Mechanism}"));
+    }
+
+    private void OnSaslSucceeded(SASLSucceeded e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, "SASL: authentication successful"));
+    }
+
+    private void OnSaslFailed(SASLFailed e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Error, $"SASL: authentication failed: {e.Reason}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Channel events
+    // ---------------------------------------------------------------------------
+
     private void OnJoinedChannel(JoinedChannel e)
     {
         var buf = GetOrCreateChannel(e.Server, e.Channel);
         buf.AddMessage(Now(MessageKind.Join, $"{e.Nick} has joined {e.Channel}"));
+        if (!buf.Members.Any(m => m.Nick.Equals(e.Nick, StringComparison.OrdinalIgnoreCase)))
+            buf.Members.Add(new ChannelMember(e.Nick, string.Empty));
     }
 
     private void OnPartedChannel(PartedChannel e)
@@ -180,6 +257,7 @@ public sealed class BufferManager : IDisposable
         if (buf is null) return;
         string reason = e.Reason is null ? string.Empty : $" ({e.Reason})";
         buf.AddMessage(Now(MessageKind.Part, $"{e.Nick} has left {e.Channel}{reason}"));
+        buf.Members.RemoveAll(m => m.Nick.Equals(e.Nick, StringComparison.OrdinalIgnoreCase));
     }
 
     private void OnKickReceived(KickReceived e)
@@ -189,7 +267,54 @@ public sealed class BufferManager : IDisposable
         string reason = e.Reason is null ? string.Empty : $" ({e.Reason})";
         buf.AddMessage(Now(MessageKind.Kick,
             $"{e.KickedNick} was kicked from {e.Channel} by {e.KickerNick}{reason}"));
+        buf.Members.RemoveAll(m => m.Nick.Equals(e.KickedNick, StringComparison.OrdinalIgnoreCase));
     }
+
+    // NAMES list replaces the entire member list for the channel. No message is added
+    // since this fires on every join and would be noisy; nicklist updates silently.
+    private void OnNamesListReceived(NamesListReceived e)
+    {
+        var buf = GetChannel(e.Server, e.Channel);
+        if (buf is null) return;
+        buf.Members.Clear();
+        foreach (var entry in e.Users)
+            buf.Members.Add(new ChannelMember(entry.Nick, new string(entry.Prefixes.ToArray())));
+    }
+
+    private void OnChannelModeChanged(ChannelModeChanged e)
+    {
+        var buf = GetChannel(e.Server, e.Channel);
+        if (buf is null) return;
+        string paramStr = e.Params.Count > 0 ? " " + string.Join(' ', e.Params) : string.Empty;
+        buf.AddMessage(Now(MessageKind.Mode,
+            $"{e.SetterNick} sets mode {e.ModeString}{paramStr} on {e.Channel}"));
+    }
+
+    private void OnUserModeChanged(UserModeChanged e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Mode, $"Mode {e.ModeString} set on {e.Nick}"));
+    }
+
+    private void OnTopicChanged(TopicChanged e)
+    {
+        var buf = GetChannel(e.Server, e.Channel);
+        if (buf is null) return;
+        buf.Topic = e.NewTopic;
+        buf.AddMessage(Now(MessageKind.Topic,
+            $"{e.SetterNick} changed the topic to: {e.NewTopic}"));
+    }
+
+    private void OnInviteReceived(InviteReceived e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Notice,
+                $"{e.FromNick} has invited you to {e.Channel}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Message events
+    // ---------------------------------------------------------------------------
 
     private void OnMessageReceived(MessageReceived e)
     {
@@ -217,19 +342,56 @@ public sealed class BufferManager : IDisposable
             .AddMessage(Now(MessageKind.ServerNotice, e.Text));
     }
 
+    private void OnWallopsReceived(WallopsReceived e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Notice, $"WALLOPS from {e.FromNick}: {e.Text}"));
+    }
+
+    private void OnCtcpRequest(CtcpRequest e)
+    {
+        string detail = e.Params is not null ? $": {e.Params}" : string.Empty;
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Notice,
+                $"CTCP {e.Command} request from {e.FromNick}{detail}"));
+    }
+
+    private void OnCtcpReply(CtcpReply e)
+    {
+        string detail = e.Params is not null ? $": {e.Params}" : string.Empty;
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Notice,
+                $"CTCP {e.Command} reply from {e.FromNick}{detail}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // User events
+    // ---------------------------------------------------------------------------
+
     private void OnNickChanged(NickChanged e)
     {
-        // Post to every channel buffer the user is in.
+        bool inAnyChannel = false;
         foreach (var ch in _buffers.OfType<ChannelBuffer>().Where(b => b.Server == e.Server))
         {
             var member = ch.Members.FirstOrDefault(m =>
                 m.Nick.Equals(e.OldNick, StringComparison.OrdinalIgnoreCase));
             if (member.Nick is null) continue;
 
+            inAnyChannel = true;
             int idx = ch.Members.IndexOf(member);
             ch.Members[idx] = member with { Nick = e.NewNick };
             ch.AddMessage(Now(MessageKind.NickChange, $"{e.OldNick} is now known as {e.NewNick}"));
         }
+        // Show in server status when not in any channel (e.g. /nick at connection time).
+        if (!inAnyChannel)
+            GetOrCreateServerStatus(e.Server)
+                .AddMessage(Now(MessageKind.NickChange, $"{e.OldNick} is now known as {e.NewNick}"));
+    }
+
+    private void OnNickInUse(NickInUse e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Error, $"Nickname '{e.Nick}' is already in use."));
     }
 
     private void OnUserQuit(UserQuit e)
@@ -246,14 +408,92 @@ public sealed class BufferManager : IDisposable
         }
     }
 
-    private void OnTopicChanged(TopicChanged e)
+    // ---------------------------------------------------------------------------
+    // WHOIS / WHO
+    // ---------------------------------------------------------------------------
+
+    private void OnWhoIsReply(WhoIsReply e)
     {
-        var buf = GetChannel(e.Server, e.Channel);
-        if (buf is null) return;
-        buf.Topic = e.NewTopic;
-        buf.AddMessage(Now(MessageKind.Topic,
-            $"{e.SetterNick} changed the topic to: {e.NewTopic}"));
+        var buf = GetOrCreateServerStatus(e.Server);
+        buf.AddMessage(Now(MessageKind.Info, $"[{e.Nick}] {e.Nick}!{e.User}@{e.Host} ({e.RealName})"));
+        buf.AddMessage(Now(MessageKind.Info, $"[{e.Nick}] Server: {e.ServerName}"));
+        if (e.Account is not null)
+            buf.AddMessage(Now(MessageKind.Info, $"[{e.Nick}] Account: {e.Account}"));
+        if (e.IdleSeconds > 0)
+        {
+            var ts = TimeSpan.FromSeconds(e.IdleSeconds);
+            buf.AddMessage(Now(MessageKind.Info,
+                $"[{e.Nick}] Idle: {ts.Hours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}"));
+        }
     }
+
+    private void OnWhoIsEnd(WhoIsEnd e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, $"[{e.Nick}] End of WHOIS"));
+    }
+
+    private void OnWhoReplyEntry(WhoReplyEntry e)
+    {
+        string channel = e.Channel ?? "*";
+        string account = e.Account is not null ? $" ({e.Account})" : string.Empty;
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info,
+                $"{e.Nick} ({e.User}@{e.Host}){account} [{channel}] {e.RealName}"));
+    }
+
+    private void OnWhoEnd(WhoEnd e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, $"End of /WHO {e.Target}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Channel list (/list)
+    // ---------------------------------------------------------------------------
+
+    private void OnChannelListEntry(ChannelListEntry e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, $"  {e.Channel} ({e.UserCount}) {e.Topic}"));
+    }
+
+    private void OnChannelListEnd(ChannelListEnd e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, "End of /LIST"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Ban list
+    // ---------------------------------------------------------------------------
+
+    private void OnBanListEntry(BanListEntry e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info,
+                $"Ban: {e.Channel} {e.Mask} (set by {e.Setter} on {e.SetAt:yyyy-MM-dd HH:mm:ss})"));
+    }
+
+    private void OnBanListEnd(BanListEnd e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Info, $"End of ban list for {e.Channel}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Error events
+    // ---------------------------------------------------------------------------
+
+    private void OnPrivilegeError(PrivilegeError e)
+    {
+        GetOrCreateServerStatus(e.Server)
+            .AddMessage(Now(MessageKind.Error, $"{e.Command}: {e.Reason}"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Raw log
+    // ---------------------------------------------------------------------------
 
     private void OnRawLineReceived(RawLineReceived e)
     {
@@ -284,19 +524,43 @@ public sealed class BufferManager : IDisposable
 
         _dispatcher.Unsubscribe<ConnectionEstablished>(OnConnectionEstablished);
         _dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed);
+        _dispatcher.Unsubscribe<ConnectionFailed>(OnConnectionFailed);
+        _dispatcher.Unsubscribe<ReconnectScheduled>(OnReconnectScheduled);
+        _dispatcher.Unsubscribe<ReconnectSucceeded>(OnReconnectSucceeded);
+        _dispatcher.Unsubscribe<ReconnectFailed>(OnReconnectFailed);
         _dispatcher.Unsubscribe<WelcomeReceived>(OnWelcomeReceived);
         _dispatcher.Unsubscribe<MOTDReceived>(OnMotdReceived);
         _dispatcher.Unsubscribe<MOTDEnd>(OnMotdEnd);
+        _dispatcher.Unsubscribe<SASLStarted>(OnSaslStarted);
+        _dispatcher.Unsubscribe<SASLSucceeded>(OnSaslSucceeded);
+        _dispatcher.Unsubscribe<SASLFailed>(OnSaslFailed);
         _dispatcher.Unsubscribe<JoinedChannel>(OnJoinedChannel);
         _dispatcher.Unsubscribe<PartedChannel>(OnPartedChannel);
         _dispatcher.Unsubscribe<KickReceived>(OnKickReceived);
+        _dispatcher.Unsubscribe<NamesListReceived>(OnNamesListReceived);
+        _dispatcher.Unsubscribe<ChannelModeChanged>(OnChannelModeChanged);
+        _dispatcher.Unsubscribe<UserModeChanged>(OnUserModeChanged);
+        _dispatcher.Unsubscribe<TopicChanged>(OnTopicChanged);
+        _dispatcher.Unsubscribe<InviteReceived>(OnInviteReceived);
         _dispatcher.Unsubscribe<MessageReceived>(OnMessageReceived);
         _dispatcher.Unsubscribe<ActionReceived>(OnActionReceived);
         _dispatcher.Unsubscribe<NoticeReceived>(OnNoticeReceived);
         _dispatcher.Unsubscribe<ServerNoticeReceived>(OnServerNoticeReceived);
+        _dispatcher.Unsubscribe<WallopsReceived>(OnWallopsReceived);
+        _dispatcher.Unsubscribe<CtcpRequest>(OnCtcpRequest);
+        _dispatcher.Unsubscribe<CtcpReply>(OnCtcpReply);
         _dispatcher.Unsubscribe<NickChanged>(OnNickChanged);
+        _dispatcher.Unsubscribe<NickInUse>(OnNickInUse);
         _dispatcher.Unsubscribe<UserQuit>(OnUserQuit);
-        _dispatcher.Unsubscribe<TopicChanged>(OnTopicChanged);
+        _dispatcher.Unsubscribe<WhoIsReply>(OnWhoIsReply);
+        _dispatcher.Unsubscribe<WhoIsEnd>(OnWhoIsEnd);
+        _dispatcher.Unsubscribe<WhoReplyEntry>(OnWhoReplyEntry);
+        _dispatcher.Unsubscribe<WhoEnd>(OnWhoEnd);
+        _dispatcher.Unsubscribe<ChannelListEntry>(OnChannelListEntry);
+        _dispatcher.Unsubscribe<ChannelListEnd>(OnChannelListEnd);
+        _dispatcher.Unsubscribe<BanListEntry>(OnBanListEntry);
+        _dispatcher.Unsubscribe<BanListEnd>(OnBanListEnd);
+        _dispatcher.Unsubscribe<PrivilegeError>(OnPrivilegeError);
         _dispatcher.Unsubscribe<RawLineReceived>(OnRawLineReceived);
         _dispatcher.Unsubscribe<RawLineSent>(OnRawLineSent);
         _dispatcher.Unsubscribe<ErrorReceived>(OnErrorReceived);

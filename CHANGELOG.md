@@ -8,6 +8,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Reconnect-enabled config flag (storage/config/Schema.cs, Loader.cs):
+
+  `AdvancedSettings.ReconnectEnabled` (bool, default `false`). When false, no
+  automatic reconnection occurs after any disconnect. When true, involuntary
+  disconnects trigger the existing exponential-backoff reconnect loop; voluntary
+  `/quit` still never reconnects because `ServerSession.DisposeAsync` is called
+  immediately after the QUIT is sent, cancelling the `ReconnectController` CTS
+  before `ConnectionClosed` fires. Schema bumped 8 -> 9; `MigrateToV9` in
+  Loader.cs adds `reconnect_enabled: false` to existing configs.
+
+- BufferManager event coverage (ui/buffers/Manager.cs):
+
+  Subscriptions added for 22 previously unhandled event types so that server
+  output is visible rather than silently discarded:
+
+  Connection/reconnect: `ConnectionFailed`, `ReconnectScheduled`,
+  `ReconnectSucceeded`, `ReconnectFailed` -- shown in the server status buffer
+  so the user sees connection feedback.
+
+  Registration: `SASLStarted`, `SASLSucceeded`, `SASLFailed` -- shown in the
+  server status buffer during SASL negotiation.
+
+  Channel housekeeping: `NamesListReceived` silently populates
+  `ChannelBuffer.Members` (the nicklist) without adding a chat line.
+  `ChannelModeChanged` and `UserModeChanged` shown as `MessageKind.Mode` lines.
+  `InviteReceived` shown as a notice in server status.
+
+  Queries: `WhoIsReply`/`WhoIsEnd` and `WhoReplyEntry`/`WhoEnd` formatted as
+  info lines in the server status buffer so `/whois` and `/who` produce visible
+  output.
+
+  Channel list: `ChannelListEntry` (compact `channel (count) topic` per line)
+  and `ChannelListEnd` shown in server status so `/list` produces output.
+
+  Ban list: `BanListEntry` and `BanListEnd` shown in server status.
+
+  Messaging: `WallopsReceived` shown as a notice; `CtcpRequest` and `CtcpReply`
+  shown as notices in server status.
+
+  Errors: `NickInUse` and `PrivilegeError` shown as error lines in server status.
+
+  Nicklist maintenance: `OnJoinedChannel` now adds the joining nick to
+  `ChannelBuffer.Members`; `OnPartedChannel` and `OnKickReceived` now remove
+  the departing nick. `OnNickChanged` falls back to the server status buffer
+  when the user is not in any channel (e.g. `/nick` before joining).
+
+### Changed
+
+- `ReconnectController` is now opt-in (DataJack/ServerSession.cs):
+
+  `_reconnect` is nullable; `ServerSession.ConnectAsync` only instantiates
+  `ReconnectController` when `config.Advanced.ReconnectEnabled` is true.
+  `DisposeAsync` null-checks before awaiting the controller.
+
+- `/quit` cleans up the session (DataJack/MainWindow.cs):
+
+  After `QuitAsync` returns, the session is removed from `_sessions` and
+  `DisposeAsync` is called immediately. This guarantees no reconnect attempt
+  occurs even when `ReconnectEnabled` is true, and frees server resources
+  promptly.
+
+### Added
 - Away/idle management (core/irc/IdleMonitor.cs, storage/config/Schema.cs):
 
   `AwaySettings` (storage/config/Schema.cs): sealed record (AwayMessage string,

@@ -25,7 +25,7 @@ internal sealed class ServerSession : IAsyncDisposable
     private readonly EventDispatcher              _dispatcher;
     private readonly IRCConnection                _connection;
     private readonly FloodController              _flood;
-    private readonly ReconnectController          _reconnect;
+    private readonly ReconnectController?         _reconnect;
     private readonly Action<ConnectionEstablished> _onEstablished;
     private bool _disposed;
 
@@ -36,7 +36,7 @@ internal sealed class ServerSession : IAsyncDisposable
         EventDispatcher dispatcher,
         IRCConnection connection,
         FloodController flood,
-        ReconnectController reconnect,
+        ReconnectController? reconnect,
         IRCCommandRouter router,
         Action<ConnectionEstablished> onEstablished)
     {
@@ -103,12 +103,16 @@ internal sealed class ServerSession : IAsyncDisposable
 
         var router = new IRCCommandRouter(connection);
 
-        var endpoint  = new NetworkEndpoint(entry.Address, entry.Port, entry.Tls);
-        var reconnect = new ReconnectController(serverId, connection, dispatcher, endpoint,
-            new ReconnectController.Config(
-                InitialDelaySeconds: adv.ReconnectInitialDelaySec,
-                MaxDelaySeconds:     adv.ReconnectMaxDelaySec,
-                MaxAttempts:         adv.ReconnectMaxAttempts));
+        var endpoint = new NetworkEndpoint(entry.Address, entry.Port, entry.Tls);
+
+        // Reconnection is opt-in; never reconnect after a voluntary /quit regardless.
+        ReconnectController? reconnect = adv.ReconnectEnabled
+            ? new ReconnectController(serverId, connection, dispatcher, endpoint,
+                new ReconnectController.Config(
+                    InitialDelaySeconds: adv.ReconnectInitialDelaySec,
+                    MaxDelaySeconds:     adv.ReconnectMaxDelaySec,
+                    MaxAttempts:         adv.ReconnectMaxAttempts))
+            : null;
 
         // Subscribe before ConnectAsync so that the initial ConnectionEstablished
         // fires the handler along with every subsequent reconnect.
@@ -161,7 +165,8 @@ internal sealed class ServerSession : IAsyncDisposable
         _disposed = true;
 
         _dispatcher.Unsubscribe(_onEstablished);
-        await _reconnect.DisposeAsync().ConfigureAwait(false);
+        if (_reconnect is not null)
+            await _reconnect.DisposeAsync().ConfigureAwait(false);
         await _flood.DisposeAsync().ConfigureAwait(false);
         await _connection.DisposeAsync().ConfigureAwait(false);
     }

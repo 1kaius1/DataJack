@@ -273,10 +273,16 @@ public sealed class ConfigTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Default_Config_SchemaVersionIsEight()
+    public void Default_Config_SchemaVersionIsNine()
     {
-        Assert.Equal(8, AppConfig.CurrentVersion);
-        Assert.Equal(8, AppConfig.Default().SchemaVersion);
+        Assert.Equal(9, AppConfig.CurrentVersion);
+        Assert.Equal(9, AppConfig.Default().SchemaVersion);
+    }
+
+    [Fact]
+    public void Default_Advanced_ReconnectEnabledIsFalse()
+    {
+        Assert.False(AppConfig.Default().Advanced.ReconnectEnabled);
     }
 
     [Fact]
@@ -752,6 +758,73 @@ public sealed class ConfigTests : IAsyncDisposable
         Assert.Contains("/tmp/datajack-debug.log", content);
         // The actual key must also be present so the file is valid JSON-with-comments.
         Assert.Contains("\"log_debug\": null", content);
+    }
+
+    // ---------------------------------------------------------------------------
+    // v8 -> v9 migration: reconnect_enabled in advanced
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Loader_MigratesV8ToV9_AddsReconnectEnabled()
+    {
+        string path = Path.Combine(_tempDir, "settings_v8.json");
+
+        string v8Json = """
+            {
+              "schema_version": 8,
+              "identity": { "nick": "tester", "alt_nicks": [], "username": "tester", "realname": "tester" },
+              "servers": [],
+              "appearance": {
+                "theme_name": "default",
+                "font_family": null,
+                "font_size": null,
+                "show_timestamps": true,
+                "timestamp_format": "HH:mm",
+                "scrollback_limit": 5000,
+                "layout_mode": "tabs"
+              },
+              "logging": { "enabled": true, "log_directory": null },
+              "advanced": {
+                "flood_token_capacity": 10.0,
+                "flood_drain_rate": 2.0,
+                "reconnect_initial_delay_sec": 2,
+                "reconnect_max_delay_sec": 300,
+                "reconnect_max_attempts": 0,
+                "log_debug": null
+              },
+              "aliases": {},
+              "highlight_patterns": [],
+              "archive": { "enabled": true, "max_age_days": 90 },
+              "dcc": { "download_directory": null, "auto_accept": false, "max_file_size_mb": 0 },
+              "away": { "message": "Away", "auto_away_enabled": false, "auto_away_delay_sec": 600 }
+            }
+            """;
+        await File.WriteAllTextAsync(path, v8Json);
+
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        Assert.Equal(AppConfig.CurrentVersion, loader.Config.SchemaVersion);
+        Assert.False(loader.Config.Advanced.ReconnectEnabled);
+    }
+
+    [Fact]
+    public async Task Loader_RoundTrip_PreservesReconnectEnabled()
+    {
+        string path = Path.Combine(_tempDir, "settings_reconnect.json");
+        var loader = new ConfigLoader(path);
+        await loader.LoadAsync();
+
+        var updated = loader.Config with
+        {
+            Advanced = loader.Config.Advanced with { ReconnectEnabled = true },
+        };
+        await loader.UpdateAsync(updated);
+
+        var loader2 = new ConfigLoader(path);
+        await loader2.LoadAsync();
+
+        Assert.True(loader2.Config.Advanced.ReconnectEnabled);
     }
 
     [Fact]

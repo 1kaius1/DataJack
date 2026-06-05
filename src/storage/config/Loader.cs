@@ -116,6 +116,9 @@ public sealed class ConfigLoader
         7 => MigrateToV7(node),
         // v8 adds "log_debug" to the "advanced" object for optional raw-I/O debug logging.
         8 => MigrateToV8(node),
+        // v9 adds "reconnect_enabled" to the "advanced" object; off by default so that
+        // existing users do not suddenly see automatic reconnection start happening.
+        9 => MigrateToV9(node),
         _ => throw new NotSupportedException($"No migration defined for schema version {targetVersion}."),
     };
 
@@ -207,6 +210,19 @@ public sealed class ConfigLoader
         }
 
         node["schema_version"] = 8;
+        return node;
+    }
+
+    private static JsonNode MigrateToV9(JsonNode node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject root &&
+            root["advanced"] is System.Text.Json.Nodes.JsonObject advanced &&
+            advanced["reconnect_enabled"] is null)
+        {
+            advanced["reconnect_enabled"] = false;
+        }
+
+        node["schema_version"] = 9;
         return node;
     }
 

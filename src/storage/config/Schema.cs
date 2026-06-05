@@ -21,7 +21,7 @@ public sealed record AppConfig(
     [property: JsonPropertyName("away")]               AwaySettings               Away)
 {
     /// <summary>Current schema version. Increment when adding fields that need migration.</summary>
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     /// <summary>Factory for a fresh default configuration.</summary>
     public static AppConfig Default() => new(
@@ -220,7 +220,13 @@ public sealed record AdvancedSettings(
     /// When non-null, raw IRC I/O and connection lifecycle events are appended to this file.
     /// PASS and AUTHENTICATE credential lines are redacted. Set to null to disable.
     /// </summary>
-    [property: JsonPropertyName("log_debug")]                    string? DebugLogPath)
+    [property: JsonPropertyName("log_debug")]                    string? DebugLogPath,
+    /// <summary>
+    /// When true, the client automatically reconnects after an unexpected disconnect.
+    /// Reconnection is never attempted after a voluntary /quit.
+    /// Off by default; configure <c>reconnect_max_attempts</c> to limit retries.
+    /// </summary>
+    [property: JsonPropertyName("reconnect_enabled")]            bool    ReconnectEnabled)
 {
     internal static AdvancedSettings Default() => new(
         FloodTokenCapacity:         10.0,
@@ -228,5 +234,6 @@ public sealed record AdvancedSettings(
         ReconnectInitialDelaySec:   2,
         ReconnectMaxDelaySec:       300,
         ReconnectMaxAttempts:       0,
-        DebugLogPath:               null);
+        DebugLogPath:               null,
+        ReconnectEnabled:           false);
 }
