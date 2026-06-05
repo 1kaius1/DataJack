@@ -26,6 +26,7 @@ internal sealed class MainWindow : Window
     private readonly LayoutManager       _layout;
     private readonly ISpellCheckService  _spellService;
     private readonly ConcurrentDictionary<string, ServerSession> _sessions = new();
+    private AliasManager                 _aliasManager = new();
     private IdleMonitor?                 _idleMonitor;
     private DebugLogger?                 _debugLogger;
 
@@ -80,6 +81,14 @@ internal sealed class MainWindow : Window
             _themeManager.Load(_configLoader.Config.Appearance.ThemeName);
             _layout.SetLayoutMode(_configLoader.Config.Appearance.LayoutMode);
             _layout.SetSpellCheckService(_spellService);
+
+            // Initialise alias manager from persisted config and wire persistence back.
+            _aliasManager = new AliasManager(_configLoader.Config.Aliases);
+            _aliasManager.AliasesChanged += () =>
+            {
+                var updated = _configLoader.Config with { Aliases = new Dictionary<string, string>(_aliasManager.GetAll()) };
+                _ = _configLoader.UpdateAsync(updated);
+            };
 
             // Start debug logger if a path is configured.
             string? debugPath = _configLoader.Config.Advanced.DebugLogPath;
@@ -136,44 +145,368 @@ internal sealed class MainWindow : Window
     // IRC command routing
     // ---------------------------------------------------------------------------
 
-    private void OnCommandIssued(string command, IBuffer? sourceBuffer)
+    private async void OnCommandIssued(string command, IBuffer? sourceBuffer)
     {
-        // Parse the command verb and route to the appropriate action.
-        string trimmed = command.TrimStart('/');
-        int spaceIdx = trimmed.IndexOf(' ');
-        string verb = spaceIdx < 0 ? trimmed : trimmed[..spaceIdx];
-        string args = spaceIdx < 0 ? string.Empty : trimmed[(spaceIdx + 1)..].TrimStart();
+        try
+        {
+            string trimmed = command.TrimStart('/');
 
-        string server = sourceBuffer?.Server ?? string.Empty;
+            // Apply alias expansion before parsing the verb. TryExpand returns the
+            // expanded command with a leading '/'; single-pass substitution only.
+            string? expanded = _aliasManager.TryExpand(trimmed);
+            if (expanded is not null)
+                trimmed = expanded.TrimStart('/');
+
+            int spaceIdx = trimmed.IndexOf(' ');
+            string verb = spaceIdx < 0 ? trimmed : trimmed[..spaceIdx];
+            string args = spaceIdx < 0 ? string.Empty : trimmed[(spaceIdx + 1)..].TrimStart();
+
+            string server = sourceBuffer?.Server ?? string.Empty;
+
+            switch (verb.ToUpperInvariant())
+            {
+                case "SERVER":
+                case "CONNECT":
+                    HandleConnectCommand(args);
+                    break;
+
+                case "SERVERLIST":
+                    OpenServerList();
+                    break;
+
+                case "LAYOUT":
+                    HandleLayoutCommand(args);
+                    break;
+
+                case "ALIAS":
+                    var ar = _aliasManager.HandleAlias(args);
+                    PrintToBuffer(sourceBuffer,
+                        ar.Success ? MessageKind.Info : MessageKind.Error, ar.Message);
+                    break;
+
+                case "UNALIAS":
+                    var ur = _aliasManager.HandleUnalias(args);
+                    PrintToBuffer(sourceBuffer,
+                        ur.Success ? MessageKind.Info : MessageKind.Error, ur.Message);
+                    break;
+
+                default:
+                    if (!_sessions.TryGetValue(server, out var session))
+                    {
+                        PrintToBuffer(sourceBuffer, MessageKind.Error, "Not connected.");
+                        break;
+                    }
+                    await DispatchIrcCommandAsync(session, verb, args, sourceBuffer);
+                    break;
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            PrintToBuffer(sourceBuffer, MessageKind.Error, ex.Message);
+        }
+    }
+
+    private async Task DispatchIrcCommandAsync(
+        ServerSession session,
+        string verb,
+        string args,
+        IBuffer? sourceBuffer)
+    {
+        string? defaultChannel = (sourceBuffer as ChannelBuffer)?.Channel;
+        string? defaultTarget  = sourceBuffer switch
+        {
+            ChannelBuffer ch => ch.Channel,
+            QueryBuffer   q  => q.TargetNick,
+            _                => null,
+        };
+
+        // Splits "word tail" into (word, tail); tail is empty string when absent.
+        static (string First, string Tail) Split2(string s)
+        {
+            int i = s.IndexOf(' ');
+            return i < 0 ? (s, string.Empty) : (s[..i], s[(i + 1)..].TrimStart());
+        }
+
+        // Splits "word1 word2 tail" into (word1, word2, tail).
+        static (string First, string Second, string Tail) Split3(string s)
+        {
+            var (first, a) = Split2(s);
+            var (second, tail) = Split2(a);
+            return (first, second, tail);
+        }
 
         switch (verb.ToUpperInvariant())
         {
-            case "SERVER":
-            case "CONNECT":
-                HandleConnectCommand(args);
+            case "JOIN":
+            {
+                var (channel, key) = Split2(args);
+                await session.Router.JoinAsync(channel, key.Length > 0 ? key : null);
+                break;
+            }
+
+            case "PART":
+            {
+                string partChannel;
+                string? partReason;
+                if (args.Length > 0 && IsChannelPrefix(args[0]))
+                {
+                    var (ch, reason) = Split2(args);
+                    partChannel = ch;
+                    partReason  = reason.Length > 0 ? reason : null;
+                }
+                else
+                {
+                    partChannel = defaultChannel ?? string.Empty;
+                    partReason  = args.Length > 0 ? args : null;
+                }
+                if (partChannel.Length == 0)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "Usage: /part [#channel] [reason]");
+                    break;
+                }
+                await session.Router.PartAsync(partChannel, partReason);
+                break;
+            }
+
+            case "MSG":
+            {
+                var (target, text) = Split2(args);
+                await session.Router.MsgAsync(target, text);
+                break;
+            }
+
+            case "NOTICE":
+            {
+                var (target, text) = Split2(args);
+                await session.Router.NoticeAsync(target, text);
+                break;
+            }
+
+            case "NICK":
+                await session.Router.NickAsync(args);
                 break;
 
-            case "SERVERLIST":
-                OpenServerList();
+            case "QUIT":
+                await session.Router.QuitAsync(args.Length > 0 ? args : null);
                 break;
 
-            case "LAYOUT":
-                HandleLayoutCommand(args);
+            case "RAW":
+                await session.Router.RawAsync(args);
                 break;
+
+            case "LIST":
+                await session.Router.ListAsync(args.Length > 0 ? args : null);
+                break;
+
+            case "WHOIS":
+                await session.Router.WhoisAsync(args);
+                break;
+
+            case "WHO":
+                await session.Router.WhoAsync(args.Length > 0 ? args : null);
+                break;
+
+            case "AWAY":
+                await session.Router.AwayAsync(args.Length > 0 ? args : null);
+                break;
+
+            case "BACK":
+                await session.Router.BackAsync();
+                break;
+
+            case "QUERY":
+            {
+                var (nick, message) = Split2(args);
+                await session.Router.QueryAsync(nick, message.Length > 0 ? message : null);
+                break;
+            }
+
+            case "ME":
+                if (defaultTarget is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel or query.");
+                    break;
+                }
+                await session.Router.MeAsync(defaultTarget, args);
+                break;
+
+            case "PING":
+                await session.Router.PingAsync(args);
+                break;
+
+            case "CTCP":
+            {
+                var (nick, rest) = Split2(args);
+                var (ctcpCmd, ctcpParams) = Split2(rest);
+                await session.Router.CtcpAsync(nick, ctcpCmd,
+                    ctcpParams.Length > 0 ? ctcpParams : null);
+                break;
+            }
+
+            case "NAMES":
+            {
+                string? namesChannel = args.Length > 0 ? args : defaultChannel;
+                await session.Router.NamesAsync(namesChannel);
+                break;
+            }
+
+            case "TOPIC":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.TopicAsync(defaultChannel,
+                    args.Length > 0 ? args : null);
+                break;
+
+            case "INVITE":
+            {
+                var (nick, chanArg) = Split2(args);
+                string inviteChannel = chanArg.Length > 0
+                    ? chanArg
+                    : (defaultChannel ?? string.Empty);
+                if (inviteChannel.Length == 0)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "Usage: /invite <nick> [#channel]");
+                    break;
+                }
+                await session.Router.InviteAsync(nick, inviteChannel);
+                break;
+            }
+
+            case "KICK":
+            {
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                var (nick, reason) = Split2(args);
+                await session.Router.KickAsync(defaultChannel, nick,
+                    reason.Length > 0 ? reason : null);
+                break;
+            }
+
+            case "BAN":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.BanAsync(defaultChannel, args);
+                break;
+
+            case "UNBAN":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.UnbanAsync(defaultChannel, args);
+                break;
+
+            case "KICKBAN":
+            {
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                var (nick, mask, reason) = Split3(args);
+                await session.Router.KickBanAsync(defaultChannel, nick, mask,
+                    reason.Length > 0 ? reason : null);
+                break;
+            }
+
+            case "OP":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.OpAsync(defaultChannel, args);
+                break;
+
+            case "DEOP":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.DeopAsync(defaultChannel, args);
+                break;
+
+            case "VOICE":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.VoiceAsync(defaultChannel, args);
+                break;
+
+            case "DEVOICE":
+                if (defaultChannel is null)
+                {
+                    PrintToBuffer(sourceBuffer, MessageKind.Error,
+                        "This command can only be used in a channel.");
+                    break;
+                }
+                await session.Router.DevoiceAsync(defaultChannel, args);
+                break;
+
+            case "MODE":
+            {
+                var (target, rest) = Split2(args);
+                var (modeStr, paramStr) = Split2(rest);
+                var modeParams = paramStr.Length > 0
+                    ? (IReadOnlyList<string>)paramStr.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    : null;
+                await session.Router.ModeAsync(target, modeStr, modeParams);
+                break;
+            }
 
             default:
-                // TODO Phase 3: route through IRCCommandRouter once connections are managed.
-                _ = server;
-                _ = args;
+                PrintToBuffer(sourceBuffer, MessageKind.Error, $"Unknown command: /{verb}");
                 break;
         }
     }
 
-    private void OnMessageIssued(string message, IBuffer? sourceBuffer)
+    private async void OnMessageIssued(string message, IBuffer? sourceBuffer)
     {
-        // TODO Phase 3: send message via FloodController -> IRCConnection.
-        _ = message;
-        _ = sourceBuffer;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+
+            string server = sourceBuffer?.Server ?? string.Empty;
+            if (!_sessions.TryGetValue(server, out var session)) return;
+
+            string? target = sourceBuffer switch
+            {
+                ChannelBuffer ch => ch.Channel,
+                QueryBuffer   q  => q.TargetNick,
+                _                => null,
+            };
+            if (target is null) return;
+
+            await session.Router.MsgAsync(target, message);
+        }
+        catch (ArgumentException ex)
+        {
+            PrintToBuffer(sourceBuffer, MessageKind.Error, ex.Message);
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -182,14 +515,15 @@ internal sealed class MainWindow : Window
 
     private void OnIdleTripped()
     {
-        // TODO Phase 3: send AWAY <message> on all connected servers once connection
-        // management is wired up. The away message is _configLoader.Config.Away.AwayMessage.
+        string msg = _configLoader.Config.Away.AwayMessage;
+        foreach (var (_, session) in _sessions)
+            _ = session.Router.AwayAsync(msg);
     }
 
     private void OnActivityResumed()
     {
-        // TODO Phase 3: send bare AWAY (back) on all connected servers once connection
-        // management is wired up.
+        foreach (var (_, session) in _sessions)
+            _ = session.Router.BackAsync();
     }
 
     // ---------------------------------------------------------------------------
@@ -277,6 +611,19 @@ internal sealed class MainWindow : Window
         };
         dialog.Show();
     }
+
+    // ---------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------
+
+    private void PrintToBuffer(IBuffer? buf, MessageKind kind, string text)
+    {
+        var target = buf
+            ?? _bufferManager.Buffers.OfType<NetworkStatusBuffer>().FirstOrDefault();
+        target?.AddMessage(new MessageEntry(DateTimeOffset.Now, null, kind, text, null));
+    }
+
+    private static bool IsChannelPrefix(char c) => c is '#' or '&' or '+' or '!';
 
     // ---------------------------------------------------------------------------
     // Cleanup
