@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stack overflow on startup eliminated; TreeView selection no longer re-enters ActivateBuffer (ui/layout/LayoutManager.cs):
+
+  `SelectTreeNode` set `TreeViewItem.IsSelected = true`, which fired the
+  TreeView's `SelectionChanged` event synchronously. `OnTreeSelectionChanged`
+  then called `ActivateBuffer`, which called `SelectTreeNode` again, producing
+  infinite recursion until a stack overflow. A `_settingSelection` guard flag
+  is now set for the duration of every programmatic `IsSelected` assignment
+  inside `SelectTreeNode`; `OnTreeSelectionChanged` returns immediately when
+  the flag is set, breaking the cycle. User-driven clicks are unaffected because
+  Avalonia sets `IsSelected` internally without going through `SelectTreeNode`.
+
 - MessageAdded lambda unsubscribed on RemoveBuffer; buffer no longer retained after close (ui/buffers/Manager.cs):
 
   `AddBuffer` wired an anonymous lambda to `buffer.MessageAdded`. Because the

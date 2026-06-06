@@ -74,6 +74,7 @@ public sealed class LayoutManager : Grid, IDisposable
     private string   _layoutMode = "tree";
     private IBuffer? _active;
     private bool     _disposed;
+    private bool     _settingSelection;
 
     // ---------------------------------------------------------------------------
     // Public state
@@ -342,6 +343,7 @@ public sealed class LayoutManager : Grid, IDisposable
 
     private void OnTreeSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_settingSelection) return;
         if (_tree.SelectedItem is TreeViewItem item && item.Tag is IBuffer buf)
             ActivateBuffer(buf);
     }
@@ -419,11 +421,19 @@ public sealed class LayoutManager : Grid, IDisposable
     // Selects the tree node for the given buffer, clearing all others.
     private void SelectTreeNode(IBuffer buffer)
     {
-        foreach (var node in _nodesByBuffer.Values)
-            node.IsSelected = false;
+        _settingSelection = true;
+        try
+        {
+            foreach (var node in _nodesByBuffer.Values)
+                node.IsSelected = false;
 
-        if (_nodesByBuffer.TryGetValue(buffer.Id, out var item))
-            item.IsSelected = true;
+            if (_nodesByBuffer.TryGetValue(buffer.Id, out var item))
+                item.IsSelected = true;
+        }
+        finally
+        {
+            _settingSelection = false;
+        }
     }
 
     // Builds the TextBlock header for a tree leaf node.
