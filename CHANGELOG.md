@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected state via events) and catch all other `Exception` types, routing
   the message to the active buffer as an error line.
 
+- WHO reply (352) parameter guard corrected from `< 7` to `< 8` (core/irc/Parser.cs):
+
+  `DispatchWhoReplyAsync` guarded with `Params.Length < 7`, then read `Param(7)`
+  (index 7). When `Params.Length == 7` the guard passed but the read was one
+  index past the end; the safe `Param()` accessor returned `string.Empty`, so
+  every minimum-length 352 reply produced a `WhoReplyEntry` with an empty
+  `RealName`. The guard is now `< 8`, matching the actual required parameter count.
+
 - URL click handler stacking in MessageView opens one tab instead of N (ui/rendering/MessageView.cs):
 
   `BuildRow` appended one `PointerPressed +=` lambda per URL span to the shared

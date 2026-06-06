@@ -458,7 +458,7 @@ public sealed class IRCParser
     private Task DispatchWhoReplyAsync(IrcMessage msg)
     {
         // :server 352 me channel user host server nick H/G :hops realname
-        if (msg.Params.Length < 7) return Task.CompletedTask;
+        if (msg.Params.Length < 8) return Task.CompletedTask;
 
         string channel = msg.Param(1);
 

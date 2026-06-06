@@ -6,75 +6,6 @@ a concrete failure scenario, and a remediation plan.
 
 ---
 
-## 4. HIGH -- Multiple URL spans stack independent PointerPressed handlers on the same TextBlock
-
-**File:** [src/ui/rendering/MessageView.cs](src/ui/rendering/MessageView.cs#L157)
-**Line:** 157
-
-`BuildRow` iterates every span in a message. For each span that carries a URL,
-it appends a new lambda to `body.PointerPressed`. Because this is `+=` on a
-single `TextBlock` instance (the shared `body`), a message with N URL spans
-accumulates N independent handlers. Any click anywhere on the `body` TextBlock
-fires all N lambdas, invoking `UrlClicked` N times and opening N browser tabs.
-
-**Failure scenario:** An IRC user pastes a message containing three hyperlinks.
-`BuildRow` registers three `PointerPressed` lambdas on the single body
-`TextBlock`. Clicking anywhere in the message opens three browser tabs
-simultaneously.
-
-**Remediation:** Register a single `PointerPressed` handler per row, and inside
-it use the pointer position to determine which URL span was hit:
-```csharp
-// Outside the span loop -- wire one handler per row.
-body.PointerPressed += (sender, e) =>
-{
-    var pt = e.GetPosition(body);
-    // Walk spans and hit-test by character offset to find the target URL.
-    foreach (var span in spans.Where(s => s.Url is not null))
-    {
-        if (SpanHitTest(body, span, pt))
-        {
-            UrlClicked?.Invoke(span.Url!);
-            break;
-        }
-    }
-};
-```
-If precise hit-testing is not feasible in this phase, an acceptable short-term
-fix is to record the first URL found in the row and open that one, but the
-multi-handler accumulation must be removed.
-
----
-
-## 5. HIGH -- WHO reply (352) guard reads one index past its own bound
-
-**File:** [src/core/irc/Parser.cs](src/core/irc/Parser.cs#L461)
-**Lines:** 461, 466
-
-```csharp
-if (msg.Params.Length < 7) return Task.CompletedTask;  // line 461
-...
-var hopRealname = msg.Param(7);                         // line 466
-```
-
-The guard allows execution to continue when `Params.Length == 7` (indices 0-6).
-`Param(7)` then accesses index 7, which is out of range. The safe `Param()`
-accessor returns `string.Empty` rather than throwing, so every WHO reply whose
-parameter count is exactly at the RFC minimum produces a silently empty
-`RealName` field in the result.
-
-**Failure scenario:** Any server that sends `352` with exactly 7 parameters
-(the minimum required by RFC 1459) produces a `WhoReplyEntry` with an empty
-`RealName`. The user list and channel information panels display blank realnames
-for all users returned by that WHO.
-
-**Remediation:** Change the guard to match the actual required count:
-```csharp
-if (msg.Params.Length < 8) return Task.CompletedTask;
-```
-
----
-
 ## 6. HIGH -- WHOIS user reply (311) guard reads one index past its own bound
 
 **File:** [src/core/irc/Parser.cs](src/core/irc/Parser.cs#L390)
@@ -249,8 +180,6 @@ private void RemoveBuffer(IBuffer buffer)
 
 | # | Severity | File | Line | Summary |
 |---|----------|------|------|---------|
-| 4 | High | MessageView.cs | 157 | N URL spans stack N `PointerPressed` handlers; clicking opens N browser tabs |
-| 5 | High | Parser.cs | 461/466 | WHO (352) guard `< 7` reads `Param(7)`; every minimum-length reply has empty realname |
 | 6 | High | Parser.cs | 390/398 | WHOIS (311) guard `< 5` reads `Param(5)`; every minimum-length reply has empty realname |
 | 7 | Medium | Manager.cs | 168 | `RawLogBuffer` duplicated on every reconnect; orphan tabs accumulate in UI |
 | 8 | Medium | Connection.cs | 97 | `_receiveCts` can be disposed and then dereferenced concurrently; `NullReferenceException` |
