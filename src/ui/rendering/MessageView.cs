@@ -144,20 +144,23 @@ public sealed class MessageView : Border
             ? $"* {msg.Nick} {msg.Text}"
             : msg.Text;
 
-        // Parse spans once; wire URL clicks on any span that carries a URL.
+        // Parse spans; collect URLs, then wire a single PointerPressed handler per row.
+        // Wiring one handler per URL span caused N handlers to accumulate on the shared
+        // body TextBlock, opening N browser tabs on any click for messages with N URLs.
         var spans = IrcTextParser.Parse(text);
         var inlines = IrcTextRenderer.Render(text, _theme).ToList();
+        var rowUrls = new List<string>();
         for (int si = 0; si < inlines.Count && si < spans.Length; si++)
         {
             if (spans[si].Url is string url)
-            {
-                string capturedUrl = url;
-                // PointerPressed on the whole body is coarse but sufficient for Phase 2.
-                // Phase 4 can refine to per-run hit testing.
-                body.PointerPressed += (_, _) => UrlClicked?.Invoke(capturedUrl);
-            }
+                rowUrls.Add(url);
             body.Inlines!.Add(inlines[si]);
         }
+
+        // Coarse whole-body hit testing: clicking anywhere on the row opens the first URL.
+        // Phase 4 can refine to per-run hit testing once layout geometry is stable.
+        if (rowUrls.Count > 0)
+            body.PointerPressed += (_, _) => UrlClicked?.Invoke(rowUrls[0]);
 
         body.Foreground = KindBrush(msg.Kind);
         row.Children.Add(body);

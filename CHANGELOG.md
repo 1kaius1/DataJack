@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected state via events) and catch all other `Exception` types, routing
   the message to the active buffer as an error line.
 
+- URL click handler stacking in MessageView opens one tab instead of N (ui/rendering/MessageView.cs):
+
+  `BuildRow` appended one `PointerPressed +=` lambda per URL span to the shared
+  `body` TextBlock. A message with N URL spans accumulated N independent handlers,
+  causing any click anywhere in the row to open N browser tabs simultaneously.
+  URLs are now collected into a list during the span loop; a single `PointerPressed`
+  handler is wired after the loop and opens the first URL in the row on click
+  (coarse hit-testing sufficient for Phase 2; per-run hit testing is deferred to Phase 4).
+
 - Config downgrade loads defaults rather than silently misinterpreting newer schema (storage/config/Loader.cs):
 
   When `onDiskVersion > AppConfig.CurrentVersion` (user ran a newer build then
