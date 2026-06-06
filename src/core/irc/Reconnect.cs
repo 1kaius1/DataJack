@@ -156,6 +156,7 @@ public sealed class ReconnectController : IAsyncDisposable
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        _dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed);
         await _cts.CancelAsync().ConfigureAwait(false);
 
         // Wait for any running reconnect loop to observe the cancellation and exit.

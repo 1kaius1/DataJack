@@ -31,6 +31,12 @@ public sealed class IRCConnection : IAsyncDisposable
     // Guards concurrent writes from SendLineAsync (PONG from receive loop, user commands, etc.)
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    // Guards _receiveCts, _receiveTask, and _stream against concurrent access between
+    // DisconnectAsync (CloseInternalAsync) and PrepareForReconnectAsync, which can race
+    // when the receive loop detects a drop and triggers reconnect while the user is
+    // simultaneously clicking Disconnect.
+    private readonly SemaphoreSlim _stateLock = new(1, 1);
+
     private Stream? _stream;
     private Task? _receiveTask;
     private CancellationTokenSource? _receiveCts;
@@ -142,24 +148,32 @@ public sealed class IRCConnection : IAsyncDisposable
     /// </summary>
     internal async Task PrepareForReconnectAsync()
     {
-        _receiveCts?.Cancel();
-
-        if (_receiveTask is not null)
+        await _stateLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try { await _receiveTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-            _receiveTask = null;
-        }
+            _receiveCts?.Cancel();
 
-        if (_stream is not null)
+            if (_receiveTask is not null)
+            {
+                try { await _receiveTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                _receiveTask = null;
+            }
+
+            if (_stream is not null)
+            {
+                await _stream.DisposeAsync().ConfigureAwait(false);
+                _stream = null;
+            }
+
+            _receiveCts?.Dispose();
+            _receiveCts = null;
+            _isTls = false;
+        }
+        finally
         {
-            await _stream.DisposeAsync().ConfigureAwait(false);
-            _stream = null;
+            _stateLock.Release();
         }
-
-        _receiveCts?.Dispose();
-        _receiveCts = null;
-        _isTls = false;
     }
 
     /// <summary>
@@ -298,18 +312,26 @@ public sealed class IRCConnection : IAsyncDisposable
 
     private async Task CloseInternalAsync()
     {
-        _receiveCts?.Cancel();
-
-        if (_receiveTask is not null)
+        await _stateLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try { await _receiveTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
+            _receiveCts?.Cancel();
+
+            if (_receiveTask is not null)
+            {
+                try { await _receiveTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
+
+            if (_stream is not null)
+            {
+                await _stream.DisposeAsync().ConfigureAwait(false);
+                _stream = null;
+            }
         }
-
-        if (_stream is not null)
+        finally
         {
-            await _stream.DisposeAsync().ConfigureAwait(false);
-            _stream = null;
+            _stateLock.Release();
         }
     }
 
@@ -322,5 +344,6 @@ public sealed class IRCConnection : IAsyncDisposable
         await CloseInternalAsync().ConfigureAwait(false);
         _receiveCts?.Dispose();
         _writeLock.Dispose();
+        _stateLock.Dispose();
     }
 }

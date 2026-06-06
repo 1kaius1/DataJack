@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ReconnectController unsubscribes ConnectionClosed on dispose; per-session leak eliminated (core/irc/Reconnect.cs):
+
+  `DisposeAsync` cancelled the CTS but never called
+  `_dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed)`. The
+  `EventDispatcher` retained a delegate reference to the disposed
+  `ReconnectController`, preventing GC. Each server session created and
+  torn down during a run leaked one instance permanently. `DisposeAsync`
+  now calls `Unsubscribe` before cancelling the CTS so no live handler
+  can fire after dispose begins.
+
+- CancellationTokenSource race between DisconnectAsync and PrepareForReconnectAsync eliminated (core/irc/Connection.cs):
+
+  `CloseInternalAsync` (called from `DisconnectAsync`) and `PrepareForReconnectAsync`
+  (triggered by the reconnect path) both mutate `_receiveCts`, `_receiveTask`, and
+  `_stream` with no synchronization. If both ran concurrently -- connection drops and
+  the receive loop triggers a reconnect while the user clicks Disconnect -- one path
+  could cancel or dispose a `CancellationTokenSource` the other had already nulled,
+  yielding `ObjectDisposedException` or `NullReferenceException`. A `SemaphoreSlim`
+  (`_stateLock`) now serializes both methods, preventing the race.
+
+- RawLogBuffer duplicated on every reconnect; orphan tabs no longer accumulate (ui/buffers/Manager.cs):
+
+  `OnConnectionEstablished` unconditionally called `AddBuffer(new RawLogBuffer(e.Server))`.
+  On any reconnect a second Raw Log tab was created for the same server, and after
+  N reconnects N-1 permanently empty tabs accumulated in the buffer tree.
+  `OnConnectionEstablished` now checks whether a `RawLogBuffer` for that server
+  already exists before calling `AddBuffer`.
+
 - async void command/message handlers crash on network errors (DataJack/MainWindow.cs):
 
   `OnCommandIssued` and `OnMessageIssued` previously caught only
