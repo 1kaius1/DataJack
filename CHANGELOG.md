@@ -19,6 +19,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected state via events) and catch all other `Exception` types, routing
   the message to the active buffer as an error line.
 
+- WHOIS user reply (311) parameter guard corrected from `< 5` to `< 6` (core/irc/Parser.cs):
+
+  `DispatchWhoisUser` guarded with `Params.Length < 5`, then read `Param(5)`
+  (index 5). When `Params.Length == 5` the guard passed but the read was one
+  index past the end; `Param()` returned `string.Empty`, producing a
+  `WhoIsAccumulator` with an empty `RealName` for every minimum-length 311
+  reply. The guard is now `< 6`, matching the actual required parameter count.
+
+- WHO reply (352) parameter guard corrected from `< 7` to `< 8` (core/irc/Parser.cs):
+
+  `DispatchWhoReplyAsync` guarded with `Params.Length < 7`, then read `Param(7)`
+  (index 7). When `Params.Length == 7` the guard passed but the read was one
+  index past the end; the safe `Param()` accessor returned `string.Empty`, so
+  every minimum-length 352 reply produced a `WhoReplyEntry` with an empty
+  `RealName`. The guard is now `< 8`, matching the actual required parameter count.
+
+- URL click handler stacking in MessageView opens one tab instead of N (ui/rendering/MessageView.cs):
+
+  `BuildRow` appended one `PointerPressed +=` lambda per URL span to the shared
+  `body` TextBlock. A message with N URL spans accumulated N independent handlers,
+  causing any click anywhere in the row to open N browser tabs simultaneously.
+  URLs are now collected into a list during the span loop; a single `PointerPressed`
+  handler is wired after the loop and opens the first URL in the row on click
+  (coarse hit-testing sufficient for Phase 2; per-run hit testing is deferred to Phase 4).
+
+- Config downgrade loads defaults rather than silently misinterpreting newer schema (storage/config/Loader.cs):
+
+  When `onDiskVersion > AppConfig.CurrentVersion` (user ran a newer build then
+  downgraded), the migration loop was skipped and the newer-schema JSON was passed
+  directly to `Deserialize<AppConfig>()`. Fields the older type does not know
+  about were silently ignored; fields renamed or removed by the newer version
+  produced null or zero-value records with no error. `LoadAsync` now detects this
+  condition early, falls back to `AppConfig.Default()`, and returns without
+  overwriting the file, preserving the user's settings for recovery if they
+  reinstall the newer build.
+
 - Config migration corrupts startup when parent object is absent (storage/config/Loader.cs):
 
   `MigrateToV6`, `MigrateToV8`, `MigrateToV9`, and `MigrateToV10` each used a

@@ -387,7 +387,7 @@ public sealed class IRCParser
     private void DispatchWhoisUser(IrcMessage msg)
     {
         // :server 311 me target user host * :realname
-        if (msg.Params.Length < 5) return;
+        if (msg.Params.Length < 6) return;
         string nick = msg.Param(1);
         _whoisBuffer[nick] = new WhoIsAccumulator
         {
@@ -458,7 +458,7 @@ public sealed class IRCParser
     private Task DispatchWhoReplyAsync(IrcMessage msg)
     {
         // :server 352 me channel user host server nick H/G :hops realname
-        if (msg.Params.Length < 7) return Task.CompletedTask;
+        if (msg.Params.Length < 8) return Task.CompletedTask;
 
         string channel = msg.Param(1);
 
