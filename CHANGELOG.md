@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MessageAdded lambda unsubscribed on RemoveBuffer; buffer no longer retained after close (ui/buffers/Manager.cs):
+
+  `AddBuffer` wired an anonymous lambda to `buffer.MessageAdded`. Because the
+  lambda was anonymous it could not be unsubscribed, so `RemoveBuffer` left a
+  live delegate on the removed buffer that captured both `buffer` and a reference
+  into `BufferManager`. The removed buffer could not be collected, and any message
+  delivered to the channel after the PART -- but before the server acknowledged it
+  -- would invoke `BufferManager.MessageAdded` for a buffer that no longer existed.
+  `AddBuffer` now stores the named handler in `_messageHandlers` keyed by buffer;
+  `RemoveBuffer` removes and unsubscribes the handler before removing the buffer
+  from the list.
+
 - ReconnectController unsubscribes ConnectionClosed on dispose; per-session leak eliminated (core/irc/Reconnect.cs):
 
   `DisposeAsync` cancelled the CTS but never called
