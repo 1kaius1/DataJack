@@ -18,6 +18,7 @@ public sealed class BufferManager : IDisposable
 {
     private readonly Core.Events.EventDispatcher _dispatcher;
     private readonly List<IBuffer> _buffers = new();
+    private readonly Dictionary<IBuffer, Action<MessageEntry>> _messageHandlers = new();
     private bool _disposed;
 
     // ---------------------------------------------------------------------------
@@ -103,14 +104,18 @@ public sealed class BufferManager : IDisposable
 
     private T AddBuffer<T>(T buffer) where T : IBuffer
     {
+        Action<MessageEntry> handler = msg => MessageAdded?.Invoke(buffer, msg);
+        _messageHandlers[buffer] = handler;
+        buffer.MessageAdded += handler;
         _buffers.Add(buffer);
-        buffer.MessageAdded += msg => MessageAdded?.Invoke(buffer, msg);
         BufferCreated?.Invoke(buffer);
         return buffer;
     }
 
     private void RemoveBuffer(IBuffer buffer)
     {
+        if (_messageHandlers.Remove(buffer, out var handler))
+            buffer.MessageAdded -= handler;
         _buffers.Remove(buffer);
         BufferDestroyed?.Invoke(buffer);
     }
