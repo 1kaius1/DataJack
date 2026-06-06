@@ -58,6 +58,17 @@ public sealed class ConfigLoader
 
         int onDiskVersion = node["schema_version"]?.GetValue<int>() ?? 0;
 
+        if (onDiskVersion > AppConfig.CurrentVersion)
+        {
+            // The on-disk config was written by a newer build. Deserializing it
+            // with the current AppConfig type would silently produce null or
+            // zero-value fields for any schema additions made by that build.
+            // Fall back to defaults without overwriting the file so the user
+            // can recover their settings by reinstalling the newer build.
+            Config = AppConfig.Default();
+            return;
+        }
+
         // Run any migrations needed to bring the file up to the current schema version.
         for (int v = onDiskVersion + 1; v <= AppConfig.CurrentVersion; v++)
             node = Migrate(node, v);

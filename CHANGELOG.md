@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected state via events) and catch all other `Exception` types, routing
   the message to the active buffer as an error line.
 
+- Config downgrade loads defaults rather than silently misinterpreting newer schema (storage/config/Loader.cs):
+
+  When `onDiskVersion > AppConfig.CurrentVersion` (user ran a newer build then
+  downgraded), the migration loop was skipped and the newer-schema JSON was passed
+  directly to `Deserialize<AppConfig>()`. Fields the older type does not know
+  about were silently ignored; fields renamed or removed by the newer version
+  produced null or zero-value records with no error. `LoadAsync` now detects this
+  condition early, falls back to `AppConfig.Default()`, and returns without
+  overwriting the file, preserving the user's settings for recovery if they
+  reinstall the newer build.
+
 - Config migration corrupts startup when parent object is absent (storage/config/Loader.cs):
 
   `MigrateToV6`, `MigrateToV8`, `MigrateToV9`, and `MigrateToV10` each used a
