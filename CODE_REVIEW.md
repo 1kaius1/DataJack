@@ -6,29 +6,6 @@ a concrete failure scenario, and a remediation plan.
 
 ---
 
-## 6. HIGH -- WHOIS user reply (311) guard reads one index past its own bound
-
-**File:** [src/core/irc/Parser.cs](src/core/irc/Parser.cs#L390)
-**Lines:** 390, 398
-
-```csharp
-if (msg.Params.Length < 5) return;   // line 390
-...
-RealName = msg.Param(5),             // line 398
-```
-
-Same pattern as finding 5. A 311 with exactly 5 parameters passes the guard;
-`Param(5)` (index 5) falls off the end and returns `string.Empty`. All WHOIS
-queries against any server that omits the trailing realname parameter, or that
-sends a minimum-parameter 311, produce an empty `RealName`.
-
-**Remediation:**
-```csharp
-if (msg.Params.Length < 6) return;
-```
-
----
-
 ## 7. MEDIUM -- OnConnectionEstablished adds a new RawLogBuffer on every reconnect
 
 **File:** [src/ui/buffers/Manager.cs](src/ui/buffers/Manager.cs#L168)
@@ -180,7 +157,6 @@ private void RemoveBuffer(IBuffer buffer)
 
 | # | Severity | File | Line | Summary |
 |---|----------|------|------|---------|
-| 6 | High | Parser.cs | 390/398 | WHOIS (311) guard `< 5` reads `Param(5)`; every minimum-length reply has empty realname |
 | 7 | Medium | Manager.cs | 168 | `RawLogBuffer` duplicated on every reconnect; orphan tabs accumulate in UI |
 | 8 | Medium | Connection.cs | 97 | `_receiveCts` can be disposed and then dereferenced concurrently; `NullReferenceException` |
 | 9 | Medium | Reconnect.cs | 63 | `ConnectionClosed` never unsubscribed in `DisposeAsync`; per-session object leak |

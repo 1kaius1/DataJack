@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected state via events) and catch all other `Exception` types, routing
   the message to the active buffer as an error line.
 
+- WHOIS user reply (311) parameter guard corrected from `< 5` to `< 6` (core/irc/Parser.cs):
+
+  `DispatchWhoisUser` guarded with `Params.Length < 5`, then read `Param(5)`
+  (index 5). When `Params.Length == 5` the guard passed but the read was one
+  index past the end; `Param()` returned `string.Empty`, producing a
+  `WhoIsAccumulator` with an empty `RealName` for every minimum-length 311
+  reply. The guard is now `< 6`, matching the actual required parameter count.
+
 - WHO reply (352) parameter guard corrected from `< 7` to `< 8` (core/irc/Parser.cs):
 
   `DispatchWhoReplyAsync` guarded with `Params.Length < 7`, then read `Param(7)`
