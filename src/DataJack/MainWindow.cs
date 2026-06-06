@@ -216,7 +216,11 @@ internal sealed class MainWindow : Window
                     break;
             }
         }
-        catch (ArgumentException ex)
+        catch (OperationCanceledException)
+        {
+            // Disconnected mid-command; the UI will reflect the new state via events.
+        }
+        catch (Exception ex)
         {
             PrintToBuffer(sourceBuffer, MessageKind.Error, ex.Message);
         }
@@ -524,7 +528,11 @@ internal sealed class MainWindow : Window
 
             await session.Router.MsgAsync(target, message);
         }
-        catch (ArgumentException ex)
+        catch (OperationCanceledException)
+        {
+            // Disconnected mid-send; the UI will reflect the new state via events.
+        }
+        catch (Exception ex)
         {
             PrintToBuffer(sourceBuffer, MessageKind.Error, ex.Message);
         }
