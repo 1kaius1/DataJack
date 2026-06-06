@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ReconnectController unsubscribes ConnectionClosed on dispose; per-session leak eliminated (core/irc/Reconnect.cs):
+
+  `DisposeAsync` cancelled the CTS but never called
+  `_dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed)`. The
+  `EventDispatcher` retained a delegate reference to the disposed
+  `ReconnectController`, preventing GC. Each server session created and
+  torn down during a run leaked one instance permanently. `DisposeAsync`
+  now calls `Unsubscribe` before cancelling the CTS so no live handler
+  can fire after dispose begins.
+
 - CancellationTokenSource race between DisconnectAsync and PrepareForReconnectAsync eliminated (core/irc/Connection.cs):
 
   `CloseInternalAsync` (called from `DisconnectAsync`) and `PrepareForReconnectAsync`

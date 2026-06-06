@@ -6,40 +6,6 @@ a concrete failure scenario, and a remediation plan.
 
 ---
 
-## 9. MEDIUM -- ReconnectController event subscription is never unsubscribed
-
-**File:** [src/core/irc/Reconnect.cs](src/core/irc/Reconnect.cs#L63)
-**Line:** 63
-
-```csharp
-dispatcher.Subscribe<ConnectionClosed>(OnConnectionClosed);  // line 63
-```
-
-`DisposeAsync` (line 157) cancels the CTS but never calls
-`dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed)`. The
-`EventDispatcher` retains a delegate reference to the disposed
-`ReconnectController` for the lifetime of the application. Each server session
-that is created and destroyed leaks one `ReconnectController` instance
-permanently.
-
-**Failure scenario:** A user connects to and disconnects from five different
-servers in one session. Five `ReconnectController` instances, each rooted by the
-`EventDispatcher`, are never collected. On long-running sessions with many
-server changes (e.g., conference IRC use), this is a slow but unbounded
-accumulation.
-
-**Remediation:**
-```csharp
-public async ValueTask DisposeAsync()
-{
-    _dispatcher.Unsubscribe<ConnectionClosed>(OnConnectionClosed);  // add this
-    await _cts.CancelAsync().ConfigureAwait(false);
-    ...
-}
-```
-
----
-
 ## 10. LOW -- MessageAdded lambda is never unsubscribed when a buffer is removed
 
 **File:** [src/ui/buffers/Manager.cs](src/ui/buffers/Manager.cs#L107)
@@ -97,5 +63,4 @@ private void RemoveBuffer(IBuffer buffer)
 
 | # | Severity | File | Line | Summary |
 |---|----------|------|------|---------|
-| 9 | Medium | Reconnect.cs | 63 | `ConnectionClosed` never unsubscribed in `DisposeAsync`; per-session object leak |
 | 10 | Low | Manager.cs | 107/112 | `MessageAdded` lambda not removed on `RemoveBuffer`; buffer retained after close |
