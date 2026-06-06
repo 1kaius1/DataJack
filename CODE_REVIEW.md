@@ -6,39 +6,6 @@ a concrete failure scenario, and a remediation plan.
 
 ---
 
-## 7. MEDIUM -- OnConnectionEstablished adds a new RawLogBuffer on every reconnect
-
-**File:** [src/ui/buffers/Manager.cs](src/ui/buffers/Manager.cs#L168)
-**Line:** 168
-
-```csharp
-private void OnConnectionEstablished(ConnectionEstablished e)
-{
-    ...
-    AddBuffer(new RawLogBuffer(e.Server));  // line 168
-}
-```
-
-`OnConnectionEstablished` unconditionally calls `AddBuffer` with no check for
-whether a `RawLogBuffer` for that server already exists. On reconnect (whether
-automatic or manual), a second `RawLogBuffer` tab is created for the same
-server. After N reconnects, N `RawLogBuffer` tabs exist for the same server,
-N-1 of which are permanently empty.
-
-**Failure scenario:** User connects to `irc.libera.chat`, loses connection
-(common on mobile networks), and reconnects three times. The buffer tree now
-shows four "Raw Log" tabs for `irc.libera.chat`.
-
-**Remediation:** Add a get-or-create guard:
-```csharp
-var existing = _buffers.OfType<RawLogBuffer>()
-                       .FirstOrDefault(b => b.Server == e.Server);
-if (existing is null)
-    AddBuffer(new RawLogBuffer(e.Server));
-```
-
----
-
 ## 8. MEDIUM -- CancellationTokenSource may be disposed and then accessed concurrently
 
 **File:** [src/core/irc/Connection.cs](src/core/irc/Connection.cs#L97)
@@ -157,7 +124,6 @@ private void RemoveBuffer(IBuffer buffer)
 
 | # | Severity | File | Line | Summary |
 |---|----------|------|------|---------|
-| 7 | Medium | Manager.cs | 168 | `RawLogBuffer` duplicated on every reconnect; orphan tabs accumulate in UI |
 | 8 | Medium | Connection.cs | 97 | `_receiveCts` can be disposed and then dereferenced concurrently; `NullReferenceException` |
 | 9 | Medium | Reconnect.cs | 63 | `ConnectionClosed` never unsubscribed in `DisposeAsync`; per-session object leak |
 | 10 | Low | Manager.cs | 107/112 | `MessageAdded` lambda not removed on `RemoveBuffer`; buffer retained after close |

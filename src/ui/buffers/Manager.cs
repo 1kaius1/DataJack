@@ -165,7 +165,10 @@ public sealed class BufferManager : IDisposable
     {
         var buf = GetOrCreateServerStatus(e.Server);
         buf.AddMessage(Now(MessageKind.Info, $"Connecting to {e.Server}..."));
-        AddBuffer(new RawLogBuffer(e.Server));
+        // Guard against duplicate tabs on reconnect: only create the RawLogBuffer
+        // if one does not already exist for this server.
+        if (!_buffers.OfType<RawLogBuffer>().Any(b => b.Server == e.Server))
+            AddBuffer(new RawLogBuffer(e.Server));
     }
 
     private void OnConnectionClosed(ConnectionClosed e)

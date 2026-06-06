@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- RawLogBuffer duplicated on every reconnect; orphan tabs no longer accumulate (ui/buffers/Manager.cs):
+
+  `OnConnectionEstablished` unconditionally called `AddBuffer(new RawLogBuffer(e.Server))`.
+  On any reconnect a second Raw Log tab was created for the same server, and after
+  N reconnects N-1 permanently empty tabs accumulated in the buffer tree.
+  `OnConnectionEstablished` now checks whether a `RawLogBuffer` for that server
+  already exists before calling `AddBuffer`.
+
 - async void command/message handlers crash on network errors (DataJack/MainWindow.cs):
 
   `OnCommandIssued` and `OnMessageIssued` previously caught only
