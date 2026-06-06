@@ -6,33 +6,6 @@ a concrete failure scenario, and a remediation plan.
 
 ---
 
-## 8. MEDIUM -- CancellationTokenSource may be disposed and then accessed concurrently
-
-**File:** [src/core/irc/Connection.cs](src/core/irc/Connection.cs#L97)
-**Line:** 97 (ReceiveLoopAsync / CloseInternalAsync interaction)
-
-`PrepareForReconnectAsync` cancels, awaits, disposes, and nulls `_receiveCts`.
-`DisconnectAsync` calls `CloseInternalAsync`, which cancels `_receiveCts` and
-awaits `_receiveTask`. There is no synchronization gate preventing concurrent
-calls to `CloseInternalAsync` (from `DisconnectAsync`) and
-`PrepareForReconnectAsync` (from a reconnect path triggered by the receive
-loop). If both code paths are in flight simultaneously, `CloseInternalAsync`
-may attempt to cancel or dispose a `CancellationTokenSource` that has already
-been set to `null` by `PrepareForReconnectAsync`, yielding a
-`NullReferenceException` or `ObjectDisposedException`.
-
-**Failure scenario:** Connection drops. `ReceiveLoopAsync` publishes
-`ConnectionClosed` and returns. `ReconnectController` fires
-`PrepareForReconnectAsync`, which nulls `_receiveCts`. Meanwhile the UI calls
-`DisconnectAsync` (user clicked Disconnect). `CloseInternalAsync` dereferences
-the now-null `_receiveCts` and throws.
-
-**Remediation:** Protect `_receiveCts` access with a `SemaphoreSlim(1,1)` or
-`lock`, or use the existing `_connectLock` if present. Alternatively: null-check
-before every access and treat null as already-cancelled.
-
----
-
 ## 9. MEDIUM -- ReconnectController event subscription is never unsubscribed
 
 **File:** [src/core/irc/Reconnect.cs](src/core/irc/Reconnect.cs#L63)
@@ -124,6 +97,5 @@ private void RemoveBuffer(IBuffer buffer)
 
 | # | Severity | File | Line | Summary |
 |---|----------|------|------|---------|
-| 8 | Medium | Connection.cs | 97 | `_receiveCts` can be disposed and then dereferenced concurrently; `NullReferenceException` |
 | 9 | Medium | Reconnect.cs | 63 | `ConnectionClosed` never unsubscribed in `DisposeAsync`; per-session object leak |
 | 10 | Low | Manager.cs | 107/112 | `MessageAdded` lambda not removed on `RemoveBuffer`; buffer retained after close |

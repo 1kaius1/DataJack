@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CancellationTokenSource race between DisconnectAsync and PrepareForReconnectAsync eliminated (core/irc/Connection.cs):
+
+  `CloseInternalAsync` (called from `DisconnectAsync`) and `PrepareForReconnectAsync`
+  (triggered by the reconnect path) both mutate `_receiveCts`, `_receiveTask`, and
+  `_stream` with no synchronization. If both ran concurrently -- connection drops and
+  the receive loop triggers a reconnect while the user clicks Disconnect -- one path
+  could cancel or dispose a `CancellationTokenSource` the other had already nulled,
+  yielding `ObjectDisposedException` or `NullReferenceException`. A `SemaphoreSlim`
+  (`_stateLock`) now serializes both methods, preventing the race.
+
 - RawLogBuffer duplicated on every reconnect; orphan tabs no longer accumulate (ui/buffers/Manager.cs):
 
   `OnConnectionEstablished` unconditionally called `AddBuffer(new RawLogBuffer(e.Server))`.
