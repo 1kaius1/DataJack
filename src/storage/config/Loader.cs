@@ -175,11 +175,15 @@ public sealed class ConfigLoader
 
     private static JsonNode MigrateToV6(JsonNode node)
     {
-        if (node is System.Text.Json.Nodes.JsonObject root &&
-            root["appearance"] is System.Text.Json.Nodes.JsonObject appearance &&
-            appearance["layout_mode"] is null)
+        if (node is System.Text.Json.Nodes.JsonObject root)
         {
-            appearance["layout_mode"] = "tree";
+            if (root["appearance"] is not System.Text.Json.Nodes.JsonObject appearance)
+            {
+                appearance = new System.Text.Json.Nodes.JsonObject();
+                root["appearance"] = appearance;
+            }
+            if (appearance["layout_mode"] is null)
+                appearance["layout_mode"] = "tree";
         }
 
         node["schema_version"] = 6;
@@ -204,11 +208,15 @@ public sealed class ConfigLoader
 
     private static JsonNode MigrateToV8(JsonNode node)
     {
-        if (node is System.Text.Json.Nodes.JsonObject root &&
-            root["advanced"] is System.Text.Json.Nodes.JsonObject advanced &&
-            advanced["log_debug"] is null)
+        if (node is System.Text.Json.Nodes.JsonObject root)
         {
-            advanced["log_debug"] = null;
+            if (root["advanced"] is not System.Text.Json.Nodes.JsonObject advanced)
+            {
+                advanced = new System.Text.Json.Nodes.JsonObject();
+                root["advanced"] = advanced;
+            }
+            if (advanced["log_debug"] is null)
+                advanced["log_debug"] = null;
         }
 
         node["schema_version"] = 8;
@@ -217,11 +225,15 @@ public sealed class ConfigLoader
 
     private static JsonNode MigrateToV9(JsonNode node)
     {
-        if (node is System.Text.Json.Nodes.JsonObject root &&
-            root["advanced"] is System.Text.Json.Nodes.JsonObject advanced &&
-            advanced["reconnect_enabled"] is null)
+        if (node is System.Text.Json.Nodes.JsonObject root)
         {
-            advanced["reconnect_enabled"] = false;
+            if (root["advanced"] is not System.Text.Json.Nodes.JsonObject advanced)
+            {
+                advanced = new System.Text.Json.Nodes.JsonObject();
+                root["advanced"] = advanced;
+            }
+            if (advanced["reconnect_enabled"] is null)
+                advanced["reconnect_enabled"] = false;
         }
 
         node["schema_version"] = 9;
@@ -230,11 +242,15 @@ public sealed class ConfigLoader
 
     private static JsonNode MigrateToV10(JsonNode node)
     {
-        if (node is System.Text.Json.Nodes.JsonObject root &&
-            root["appearance"] is System.Text.Json.Nodes.JsonObject appearance &&
-            appearance["use_24_hour_time"] is null)
+        if (node is System.Text.Json.Nodes.JsonObject root)
         {
-            appearance["use_24_hour_time"] = true;
+            if (root["appearance"] is not System.Text.Json.Nodes.JsonObject appearance)
+            {
+                appearance = new System.Text.Json.Nodes.JsonObject();
+                root["appearance"] = appearance;
+            }
+            if (appearance["use_24_hour_time"] is null)
+                appearance["use_24_hour_time"] = true;
         }
 
         node["schema_version"] = 10;

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- async void command/message handlers crash on network errors (DataJack/MainWindow.cs):
+
+  `OnCommandIssued` and `OnMessageIssued` previously caught only
+  `ArgumentException`; any `IOException`, `SocketException`, or other exception
+  thrown by the underlying router calls would escape the `async void` boundary
+  and become an unhandled exception, crashing the process. Both methods now
+  catch `OperationCanceledException` silently (the UI already reflects the
+  disconnected state via events) and catch all other `Exception` types, routing
+  the message to the active buffer as an error line.
+
+- Config migration corrupts startup when parent object is absent (storage/config/Loader.cs):
+
+  `MigrateToV6`, `MigrateToV8`, `MigrateToV9`, and `MigrateToV10` each used a
+  chained `&&` pattern that required the parent `"appearance"` or `"advanced"`
+  JsonObject to already exist. When the parent key was missing (corrupted or
+  hand-edited config), the guard failed silently, the required child fields were
+  never inserted, but `schema_version` was still bumped. The subsequent
+  `Deserialize<AppConfig>()` then saw a missing non-nullable sub-object and
+  produced a null-field record, causing `NullReferenceException` on first access.
+  Migrations now create the parent object when absent before inserting child keys.
+
 ### Added
 
 - Reconnect-enabled config flag (storage/config/Schema.cs, Loader.cs):
